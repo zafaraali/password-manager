@@ -16,13 +16,21 @@ export default function App() {
   const theme = useMemo(() => createTheme({
     palette: {
       mode: mode,
-      primary: { main: '#6366f1' },
-      secondary: { main: '#10b981' },
+      primary: { main: '#6366f1', light: '#818cf8', dark: '#4f46e5' },
+      secondary: { main: '#10b981', light: '#34d399', dark: '#059669' },
       background: {
-        default: mode === 'dark' ? '#0f172a' : '#f8fafc',
-        paper: mode === 'dark' ? '#1e293b' : '#ffffff',
+        default: mode === 'dark' ? '#090d16' : '#f8fafc',
+        paper: mode === 'dark' ? '#111827' : '#ffffff',
       },
-      divider: mode === 'dark' ? '#334155' : '#e2e8f0',
+      divider: mode === 'dark' ? '#1f2937' : '#e5e7eb',
+    },
+    shape: {
+      borderRadius: 12,
+    },
+    typography: {
+      fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
+      h5: { fontWeight: 700, letterSpacing: '-0.025em' },
+      h6: { fontWeight: 600, letterSpacing: '-0.015em' },
     },
   }), [mode]);
 
@@ -40,7 +48,6 @@ export default function App() {
   const [openProfileManager, setOpenProfileManager] = useState(false);
   const [openSettings, setOpenSettings] = useState(false);
 
-  // User Preferences / Settings state
   const [settings, setSettings] = useState({
     showNextCodeAuto: false,
     passwordLength: 16,
@@ -267,7 +274,7 @@ export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
         <Navbar 
           mode={mode} 
           setMode={setMode} 
@@ -285,7 +292,15 @@ export default function App() {
         />
 
         <Container component="main" maxWidth="md" sx={{ mt: 6, mb: 6, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          {successMsg && <Snackbar open autoHideDuration={4000} onClose={() => setSuccessMsg('')} message={successMsg} />}
+          {successMsg && (
+            <Snackbar 
+              open 
+              autoHideDuration={4000} 
+              onClose={() => setSuccessMsg('')} 
+              message={successMsg} 
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+            />
+          )}
 
           {view === 'setup' && (
             <SetupView profileName={currentProfile} onSetupSuccess={() => {

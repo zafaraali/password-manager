@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Box, FormControl, InputLabel, Select, MenuItem, Typography, IconButton, InputAdornment } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Box, FormControl, InputLabel, Select, MenuItem, Typography, IconButton, InputAdornment, LinearProgress } from '@mui/material';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { CryptoEngine } from '../utils/crypto';
@@ -79,6 +79,23 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
     setFormPassword(res);
   };
 
+  // Password strength meter calculation
+  const getPasswordStrength = (pwd) => {
+    if (!pwd) return { score: 0, label: 'Empty', color: 'error' };
+    let score = 0;
+    if (pwd.length >= 8) score += 25;
+    if (pwd.length >= 12) score += 25;
+    if (/[A-Z]/.test(pwd) && /[0-9]/.test(pwd)) score += 25;
+    if (/[^A-Za-z0-9]/.test(pwd)) score += 25;
+
+    if (score <= 25) return { score, label: 'Weak', color: 'error' };
+    if (score <= 50) return { score, label: 'Fair', color: 'warning' };
+    if (score <= 75) return { score, label: 'Good', color: 'info' };
+    return { score: 100, label: 'Strong', color: 'success' };
+  };
+
+  const strength = getPasswordStrength(formPassword);
+
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -105,7 +122,6 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
     e.preventDefault();
     if (!formName) return;
 
-    // Retain existing password history if editing
     const existingHistory = editingItem?.passwordHistory || [];
     let updatedHistory = [...existingHistory];
 
@@ -114,7 +130,6 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
         password: editingItem.password,
         timestamp: new Date().toISOString()
       });
-      // Limit to last 5 versions
       if (updatedHistory.length > 5) updatedHistory.pop();
     }
 
@@ -133,16 +148,17 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ fontWeight: 600 }}>{editingItem ? 'Edit Vault Item' : 'New Vault Item & Template'}</DialogTitle>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
+      <DialogTitle sx={{ fontWeight: 800, fontSize: '1.25rem' }}>{editingItem ? 'Edit Vault Item' : 'New Vault Item & Template'}</DialogTitle>
       <DialogContent dividers>
-        <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+        <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mt: 1 }}>
           <TextField
             label="Item Name"
             required
             fullWidth
             value={formName}
             onChange={(e) => setFormName(e.target.value)}
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
           <FormControl fullWidth>
             <InputLabel>Category / Template</InputLabel>
@@ -150,6 +166,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
               value={formCategory}
               label="Category / Template"
               onChange={(e) => handleCategoryChange(e.target.value)}
+              sx={{ borderRadius: 3 }}
             >
               <MenuItem value="Logins">🔐 Login / Password</MenuItem>
               <MenuItem value="Cards">💳 Credit / Debit Card</MenuItem>
@@ -168,38 +185,48 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 fullWidth
                 value={formUsername}
                 onChange={(e) => setFormUsername(e.target.value)}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
-              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                <TextField
-                  label="Password / Secret Value"
-                  fullWidth
-                  type={showPassword ? 'text' : 'password'}
-                  value={formPassword}
-                  onChange={(e) => setFormPassword(e.target.value)}
-                  InputProps={{
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <IconButton
-                          onClick={() => setShowPassword(!showPassword)}
-                          edge="end"
-                        >
-                          {showPassword ? <VisibilityOff /> : <Visibility />}
-                        </IconButton>
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-                <Button variant="outlined" onClick={generateRandomPassword} sx={{ whiteSpace: 'nowrap', height: '56px' }}>
-                  Generate ({settings?.passwordLength || 16})
-                </Button>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <TextField
+                    label="Password / Secret Value"
+                    fullWidth
+                    type={showPassword ? 'text' : 'password'}
+                    value={formPassword}
+                    onChange={(e) => setFormPassword(e.target.value)}
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+                    InputProps={{
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
+                            {showPassword ? <VisibilityOff /> : <Visibility />}
+                          </IconButton>
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                  <Button variant="outlined" onClick={generateRandomPassword} sx={{ whiteSpace: 'nowrap', height: '56px', borderRadius: 3, fontWeight: 600 }}>
+                    Generate ({settings?.passwordLength || 16})
+                  </Button>
+                </Box>
+                {formPassword && (
+                  <Box sx={{ px: 1 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                      <Typography variant="caption" color="text.secondary">Password Strength</Typography>
+                      <Typography variant="caption" color={`${strength.color}.main`} sx={{ fontWeight: 700 }}>{strength.label}</Typography>
+                    </Box>
+                    <LinearProgress variant="determinate" value={strength.score} color={strength.color} sx={{ height: 6, borderRadius: 3 }} />
+                  </Box>
+                )}
               </Box>
             </>
           )}
 
           {formCategory === 'Crypto' && (
-            <Box sx={{ p: 2, border: 1, borderColor: 'primary.main', borderRadius: 2, bgcolor: 'action.hover', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Box sx={{ p: 2.5, border: 1, borderColor: 'primary.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 600 }}>🪙 Crypto Wallet Template</Typography>
+                <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 700 }}>🪙 Crypto Wallet Template</Typography>
                 <IconButton size="small" onClick={() => setShowSeed(!showSeed)}>
                   {showSeed ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                 </IconButton>
@@ -213,6 +240,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 value={templateData.seedPhrase || ''}
                 onChange={(e) => setTemplateData(prev => ({ ...prev, seedPhrase: e.target.value }))}
                 placeholder="word1 word2 word3 ..."
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
               <TextField
                 label="Derivation Path"
@@ -220,14 +248,15 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 value={templateData.derivationPath || ''}
                 onChange={(e) => setTemplateData(prev => ({ ...prev, derivationPath: e.target.value }))}
                 placeholder="m/44'/60'/0'/0/0"
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
             </Box>
           )}
 
           {formCategory === 'SSH' && (
-            <Box sx={{ p: 2, border: 1, borderColor: 'primary.main', borderRadius: 2, bgcolor: 'action.hover', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Box sx={{ p: 2.5, border: 1, borderColor: 'primary.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 600 }}>🖥️ Server SSH Key Template</Typography>
+                <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 700 }}>🖥️ Server SSH Key Template</Typography>
                 <IconButton size="small" onClick={() => setShowKey(!showKey)}>
                   {showKey ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                 </IconButton>
@@ -238,12 +267,14 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 value={templateData.host || ''}
                 onChange={(e) => setTemplateData(prev => ({ ...prev, host: e.target.value }))}
                 placeholder="192.168.1.50 or server.com"
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
               <TextField
                 label="SSH Port"
                 fullWidth
                 value={templateData.port || '22'}
                 onChange={(e) => setTemplateData(prev => ({ ...prev, port: e.target.value }))}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
               <TextField
                 label="Private Key (PEM format)"
@@ -254,6 +285,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 value={templateData.privateKey || ''}
                 onChange={(e) => setTemplateData(prev => ({ ...prev, privateKey: e.target.value }))}
                 placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
               <TextField
                 label="Key Passphrase (Optional)"
@@ -261,6 +293,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 fullWidth
                 value={templateData.passphrase || ''}
                 onChange={(e) => setTemplateData(prev => ({ ...prev, passphrase: e.target.value }))}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
                 InputProps={{
                   endAdornment: (
                     <InputAdornment position="end">
@@ -275,13 +308,14 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
           )}
 
           {formCategory === 'Wifi' && (
-            <Box sx={{ p: 2, border: 1, borderColor: 'primary.main', borderRadius: 2, bgcolor: 'action.hover', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 600 }}>📶 Wi-Fi Router Template</Typography>
+            <Box sx={{ p: 2.5, border: 1, borderColor: 'primary.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 700 }}>📶 Wi-Fi Router Template</Typography>
               <TextField
                 label="SSID (Network Name)"
                 fullWidth
                 value={templateData.ssid || ''}
                 onChange={(e) => setTemplateData(prev => ({ ...prev, ssid: e.target.value }))}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
               <TextField
                 label="Wi-Fi Password / Key"
@@ -289,6 +323,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 type={showPassword ? 'text' : 'password'}
                 value={formPassword}
                 onChange={(e) => setFormPassword(e.target.value)}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
                 InputProps={{
                   endAdornment: (
                     <InputAdornment position="end">
@@ -304,6 +339,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 fullWidth
                 value={templateData.securityType || 'WPA2/WPA3'}
                 onChange={(e) => setTemplateData(prev => ({ ...prev, securityType: e.target.value }))}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
             </Box>
           )}
@@ -315,6 +351,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             value={formTotp}
             onChange={(e) => setFormTotp(e.target.value)}
             placeholder="JBSWY3DPEHPK3PXP"
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
             InputProps={{
               endAdornment: (
                 <InputAdornment position="end">
@@ -326,17 +363,17 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             }}
           />
 
-          <Box sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>📎 Encrypted File Attachment</Typography>
+          <Box sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 3 }}>
+            <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600 }}>📎 Encrypted File Attachment</Typography>
             {formAttachment ? (
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
                   {formAttachment.name} ({(formAttachment.size / 1024).toFixed(1)} KB)
                 </Typography>
-                <Button size="small" color="error" onClick={() => setFormAttachment(null)}>Remove</Button>
+                <Button size="small" color="error" onClick={() => setFormAttachment(null)} sx={{ textTransform: 'none' }}>Remove</Button>
               </Box>
             ) : (
-              <Button variant="outlined" component="label" size="small">
+              <Button variant="outlined" component="label" size="small" sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}>
                 Attach File (Max 5MB)
                 <input type="file" hidden onChange={handleFileUpload} />
               </Button>
@@ -350,12 +387,13 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             fullWidth
             value={formNotes}
             onChange={(e) => setFormNotes(e.target.value)}
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
         </Box>
       </DialogContent>
       <DialogActions sx={{ p: 2.5 }}>
-        <Button onClick={onClose} color="inherit">Cancel</Button>
-        <Button onClick={handleSubmit} variant="contained" sx={{ color: '#fff' }}>Save Item</Button>
+        <Button onClick={onClose} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>Cancel</Button>
+        <Button onClick={handleSubmit} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Save Item</Button>
       </DialogActions>
     </Dialog>
   );

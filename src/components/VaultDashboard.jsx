@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Paper, Typography, Button, Box, Tabs, Tab, TextField, Grid, Chip } from '@mui/material';
+import { Paper, Typography, Button, Box, Tabs, Tab, TextField, Grid, Chip, IconButton } from '@mui/material';
 import ItemModal from './ItemModal';
 import SecurityAuditorModal from './SecurityAuditorModal';
 import ExportModal from './ExportModal';
@@ -9,6 +9,11 @@ import PasswordHistoryModal from './PasswordHistoryModal';
 import TOTPWidget from './TOTPWidget';
 import { CryptoEngine } from '../utils/crypto';
 import { TOTP } from '../utils/totp';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 
 export default function VaultDashboard({ 
   vaultItems, trashItems, onSaveItem, onDeleteItem, onRestoreItem, onDeletePermanent,
@@ -89,17 +94,8 @@ export default function VaultDashboard({
             if (currentClip === valToCopy) {
               await navigator.clipboard.writeText('');
             }
-          } else {
-            const textarea = document.createElement('textarea');
-            textarea.value = '';
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
           }
-        } catch (err) {
-          // Ignore clipboard read errors in restrictive browser environments
-        }
+        } catch (err) {}
       }, timeoutSec * 1000);
     } catch (err) {
       alert('Failed to copy to clipboard: ' + err.message);
@@ -216,39 +212,37 @@ export default function VaultDashboard({
 
   return (
     <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <Paper elevation={2} sx={{ p: 3, borderRadius: 3, border: 1, borderColor: 'divider', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+      <Paper elevation={0} sx={{ p: 3.5, borderRadius: 4, border: 1, borderColor: 'divider', background: (theme) => theme.palette.mode === 'dark' ? 'linear-gradient(135deg, #111827 0%, #1f2937 100%)' : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 2, boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}>
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 600 }}>Vault Dashboard [{currentProfile}]</Typography>
-          <Typography variant="body2" color="text.secondary">
-            {vaultItems.length} secure item{vaultItems.length === 1 ? '' : 's'} stored locally. {copiedMsg && <span style={{ color: '#10b981', marginLeft: '8px' }}>{copiedMsg}</span>}
+          <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.5 }}>Vault Dashboard [{currentProfile}]</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <span>🛡️ {vaultItems.length} secure item{vaultItems.length === 1 ? '' : 's'} stored locally.</span>
+            {copiedMsg && <Box component="span" sx={{ color: 'secondary.main', fontWeight: 600, bgcolor: 'secondary.main', bgOpacity: 0.1, px: 1, py: 0.2, borderRadius: 1 }}>{copiedMsg}</Box>}
           </Typography>
         </Box>
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Button variant="outlined" component="label" sx={{ textTransform: 'none', fontWeight: 600 }}>
-            📥 Import Backup (JSON)
+        <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          <Button variant="outlined" component="label" sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, px: 2 }}>
+            📥 Import JSON
             <input type="file" hidden accept=".json" onChange={handleVaultJsonImport} />
           </Button>
-          <Button variant="outlined" component="label" sx={{ textTransform: 'none', fontWeight: 600 }}>
-            📷 Import Google Auth / 2FAS
+          <Button variant="outlined" component="label" sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, px: 2 }}>
+            📷 Import 2FA
             <input type="file" hidden accept=".json,image/*" onChange={handleAuthImport} />
           </Button>
-          <Button variant="outlined" onClick={() => setOpenAuditor(true)} sx={{ textTransform: 'none', fontWeight: 600 }}>
-            Audit
-          </Button>
-          <Button variant="outlined" onClick={() => setOpenExport(true)} sx={{ textTransform: 'none', fontWeight: 600 }}>
-            Backup
-          </Button>
-          <Button variant="outlined" onClick={() => setOpenTrash(true)} sx={{ textTransform: 'none', fontWeight: 600 }}>
-            Trash ({trashItems.length})
-          </Button>
-          <Button variant="contained" size="large" onClick={handleOpenAdd} sx={{ textTransform: 'none', fontWeight: 600, color: '#fff' }}>
+          <Button variant="contained" size="large" onClick={handleOpenAdd} sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3, background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)' }}>
             + Add Item
           </Button>
         </Box>
       </Paper>
 
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'space-between', alignItems: 'center' }}>
-        <Tabs value={filterCategory} onChange={(e, val) => setFilterCategory(val)} sx={{ borderBottom: 1, borderColor: 'divider' }}>
+        <Tabs 
+          value={filterCategory} 
+          onChange={(e, val) => setFilterCategory(val)} 
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 600, fontSize: '0.9rem', minHeight: 44, borderRadius: 2, mr: 1 } }}
+        >
           <Tab label="All" value="All" />
           <Tab label="Logins" value="Logins" />
           <Tab label="Cards" value="Cards" />
@@ -263,55 +257,70 @@ export default function VaultDashboard({
           placeholder="Search vault..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          sx={{ width: { xs: '100%', sm: '240px' } }}
+          sx={{ width: { xs: '100%', sm: '260px' }, '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
         />
       </Box>
 
       <Grid container spacing={3}>
         {filteredItems.length === 0 ? (
           <Grid item xs={12}>
-            <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3, border: 1, borderColor: 'divider' }}>
-              <Typography variant="body1" color="text.secondary">No vault items found.</Typography>
+            <Paper elevation={0} sx={{ p: 6, textAlign: 'center', borderRadius: 4, border: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
+              <Typography variant="h3" sx={{ mb: 2 }}>📭</Typography>
+              <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>No vault items found</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Get started by adding your first login, secure note, or encrypted template.
+              </Typography>
+              <Button variant="contained" onClick={handleOpenAdd} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, color: '#fff' }}>
+                + Add Item Now
+              </Button>
             </Paper>
           </Grid>
         ) : (
           filteredItems.map(item => {
             const isRevealed = showPasswordMap[item.id];
             const hasHistory = item.passwordHistory && item.passwordHistory.length > 0;
+            const domain = item.username && item.username.includes('@') ? item.username.split('@')[1] : null;
+            const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null;
+
             return (
               <Grid item xs={12} sm={6} key={item.id}>
-                <Paper sx={{ p: 3, borderRadius: 3, border: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', position: 'relative', '&:hover': { borderColor: 'primary.main' }, transition: 'all 0.2s' }}>
+                <Paper elevation={0} sx={{ p: 3, borderRadius: 4, border: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', position: 'relative', bgcolor: 'background.paper', '&:hover': { borderColor: 'primary.main', boxShadow: '0 8px 24px rgba(0,0,0,0.08)', transform: 'translateY(-2px)' }, transition: 'all 0.25s ease-in-out' }}>
                   <Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                      <Typography variant="h6" sx={{ fontWeight: 600 }}>{item.name}</Typography>
-                      <Chip label={item.category} size="small" color="primary" variant="outlined" />
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1.5 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        {faviconUrl && (
+                          <Box component="img" src={faviconUrl} alt="" sx={{ width: 24, height: 24, borderRadius: 1 }} onError={(e) => e.target.style.display = 'none'} />
+                        )}
+                        <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '1.1rem' }}>{item.name}</Typography>
+                      </Box>
+                      <Chip label={item.category} size="small" color="primary" variant="outlined" sx={{ fontWeight: 600, borderRadius: 1.5 }} />
                     </Box>
 
                     {item.category === 'Crypto' && item.templateData && (
-                      <Box sx={{ mb: 2, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+                      <Box sx={{ mb: 2, p: 2, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', borderRadius: 2, border: 1, borderColor: 'divider' }}>
                         <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>🪙 Crypto Wallet Seed</Typography>
-                        <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all', fontSize: '0.8rem' }}>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all', fontSize: '0.85rem' }}>
                           {isRevealed ? item.templateData.seedPhrase : '••••••••••••••••••••••••••••'}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
                           Path: {item.templateData.derivationPath}
                         </Typography>
                       </Box>
                     )}
 
                     {item.category === 'SSH' && item.templateData && (
-                      <Box sx={{ mb: 2, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+                      <Box sx={{ mb: 2, p: 2, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', borderRadius: 2, border: 1, borderColor: 'divider' }}>
                         <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>🖥️ SSH Config ({item.templateData.host}:{item.templateData.port})</Typography>
-                        <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all', fontSize: '0.8rem' }}>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace', wordBreak: 'break-all', fontSize: '0.85rem' }}>
                           {isRevealed ? item.templateData.privateKey : '-----BEGIN RSA PRIVATE KEY-----'}
                         </Typography>
                       </Box>
                     )}
 
                     {item.category === 'Wifi' && item.templateData && (
-                      <Box sx={{ mb: 2, p: 1.5, bgcolor: 'action.hover', borderRadius: 1 }}>
+                      <Box sx={{ mb: 2, p: 2, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', borderRadius: 2, border: 1, borderColor: 'divider' }}>
                         <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>📶 Wi-Fi ({item.templateData.ssid})</Typography>
-                        <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.9rem' }}>
                           Password: {isRevealed ? item.password : '••••••••••••'}
                         </Typography>
                       </Box>
@@ -319,10 +328,10 @@ export default function VaultDashboard({
 
                     {item.category !== 'Crypto' && item.category !== 'SSH' && item.category !== 'Wifi' && (
                       <>
-                        <Typography variant="body2" sx={{ fontFamily: 'monospace', color: 'text.secondary', mb: 1 }}>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace', color: 'text.secondary', mb: 1.5, fontSize: '0.85rem' }}>
                           {item.username || 'No username'}
                         </Typography>
-                        <Typography variant="body2" sx={{ fontFamily: 'monospace', mb: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace', mb: 1.5, p: 1.5, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.02)', borderRadius: 2, border: 1, borderColor: 'divider', fontSize: '0.9rem' }}>
                           {isRevealed ? item.password : '••••••••••••'}
                         </Typography>
                       </>
@@ -331,41 +340,45 @@ export default function VaultDashboard({
                     {item.totpSecret && <TOTPWidget secret={item.totpSecret} settings={settings} />}
 
                     {item.attachment && (
-                      <Box sx={{ mt: 1, p: 1, border: 1, borderColor: 'divider', borderRadius: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Box sx={{ mt: 1.5, p: 1.5, border: 1, borderColor: 'divider', borderRadius: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
                           📎 {item.attachment.name}
                         </Typography>
-                        <Button size="small" onClick={() => handleDownloadAttachment(item.attachment)}>
+                        <Button size="small" onClick={() => handleDownloadAttachment(item.attachment)} sx={{ textTransform: 'none', fontWeight: 600 }}>
                           Download
                         </Button>
                       </Box>
                     )}
 
                     {item.notes && (
-                      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, mb: 2, display: 'block' }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, mb: 2, display: 'block' }}>
                         {item.notes}
                       </Typography>
                     )}
                   </Box>
 
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <Box sx={{ display: 'flex', gap: 1 }}>
-                        <Button size="small" onClick={() => setShowPasswordMap(prev => ({ ...prev, [item.id]: !prev[item.id] }))}>
+                        <Button size="small" variant="text" startIcon={isRevealed ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />} onClick={() => setShowPasswordMap(prev => ({ ...prev, [item.id]: !prev[item.id] }))} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}>
                           {isRevealed ? 'Hide' : 'Reveal'}
                         </Button>
-                        <Button size="small" variant="outlined" onClick={() => handleCopyValue(item)}>
+                        <Button size="small" variant="contained" startIcon={<ContentCopyIcon fontSize="small" />} onClick={() => handleCopyValue(item)} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, color: '#fff', bgcolor: 'primary.main', '&:hover': { bgcolor: 'primary.dark' } }}>
                           Copy
                         </Button>
                       </Box>
-                      <Box>
-                        <Button size="small" onClick={() => handleOpenEdit(item)}>Edit</Button>
-                        <Button size="small" color="error" onClick={() => onDeleteItem(item.id)}>Delete</Button>
+                      <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <IconButton size="small" onClick={() => handleOpenEdit(item)} title="Edit" sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
+                          <EditOutlinedIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" color="error" onClick={() => onDeleteItem(item.id)} title="Delete" sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
                       </Box>
                     </Box>
 
                     {hasHistory && (
-                      <Button size="small" variant="text" onClick={() => setHistoryItem(item)} sx={{ alignSelf: 'flex-start', textTransform: 'none', fontSize: '0.75rem', p: 0 }}>
+                      <Button size="small" variant="text" onClick={() => setHistoryItem(item)} sx={{ alignSelf: 'flex-start', textTransform: 'none', fontWeight: 600, fontSize: '0.75rem', p: 0, color: 'primary.main' }}>
                         🕒 View Password History ({item.passwordHistory.length})
                       </Button>
                     )}
