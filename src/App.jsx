@@ -1,463 +1,350 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ThemeProvider, createTheme, CssBaseline, Container, Box, Snackbar } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { ThemeProvider, createTheme, CssBaseline, Box } from '@mui/material';
 import Navbar from './components/Navbar';
 import SetupView from './components/SetupView';
 import UnlockView from './components/UnlockView';
+import ProfileSelectionView from './components/ProfileSelectionView';
 import VaultDashboard from './components/VaultDashboard';
+import ItemModal from './components/ItemModal';
 import SecurityAuditorModal from './components/SecurityAuditorModal';
 import ExportModal from './components/ExportModal';
 import TrashModal from './components/TrashModal';
 import ProfileManagerModal from './components/ProfileManagerModal';
 import SettingsModal from './components/SettingsModal';
+import PasswordHistoryModal from './components/PasswordHistoryModal';
 import AuthenticatorOnlyView from './components/AuthenticatorOnlyView';
-import { CryptoEngine } from './utils/crypto';
+import TOTPWidget from './components/TOTPWidget';
+import { encryptData, decryptData } from './utils/crypto';
 
 export default function App() {
-  const [mode, setMode] = useState('dark');
+  const getStoredProfiles = () => {
+    try {
+      return JSON.parse(localStorage.getItem('ciphervault_profiles')) || [];
+    } catch {
+      return [];
+    }
+  };
 
-  const [settings, setSettings] = useState({
-    accentColor: '#6366f1',
-    showNextCodeAuto: false,
-    passwordLength: 16,
-    genUppercase: true,
-    genLowercase: true,
-    genNumbers: true,
-    genSymbols: true,
-    clipboardTimeout: 30,
-    autoLockMinutes: 10
+  const [profiles, setProfiles] = useState(getStoredProfiles);
+  const [selectedUsername, setSelectedUsername] = useState('');
+  const [viewState, setViewState] = useState(() => {
+    const list = getStoredProfiles();
+    return list.length > 0 ? 'select_profile' : 'setup';
   });
 
-  const theme = useMemo(() => createTheme({
-    palette: {
-      mode: mode,
-      primary: { main: settings.accentColor || '#6366f1' },
-      secondary: { main: '#10b981', light: '#34d399', dark: '#059669' },
-      background: {
-        default: mode === 'dark' ? '#090d16' : '#f8fafc',
-        paper: mode === 'dark' ? '#111827' : '#ffffff',
-      },
-      divider: mode === 'dark' ? '#1f2937' : '#e5e7eb',
-    },
-    shape: {
-      borderRadius: 12,
-    },
-    typography: {
-      fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
-      h5: { fontWeight: 700, letterSpacing: '-0.025em' },
-      h6: { fontWeight: 600, letterSpacing: '-0.015em' },
-    },
-  }), [mode, settings.accentColor]);
-
-  const [profiles, setProfiles] = useState(['Default']);
-  const [currentProfile, setCurrentProfile] = useState('Default');
-
-  const [view, setView] = useState('loading');
-  const [key, setKey] = useState(null);
+  const [masterPassword, setMasterPassword] = useState('');
   const [vaultItems, setVaultItems] = useState([]);
-  const [trashItems, setTrashItems] = useState([]);
-  const [successMsg, setSuccessMsg] = useState('');
-  const [openAuditor, setOpenAuditor] = useState(false);
-  const [openExport, setOpenExport] = useState(false);
-  const [openTrash, setOpenTrash] = useState(false);
-  const [openProfileManager, setOpenProfileManager] = useState(false);
-  const [openSettings, setOpenSettings] = useState(false);
+
+  const [mode, setMode] = useState('dark');
+  const [resolvedMode, setResolvedMode] = useState('dark');
+  const [accentColor, setAccentColor] = useState('#6366f1');
+  const [useGradient, setUseGradient] = useState(true);
+  const [autoLockMinutes, setAutoLockMinutes] = useState(0);
+
+  const [isItemModalOpen, setIsItemModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [isAuditorOpen, setIsAuditorOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isQROpen, setIsQROpen] = useState(false);
+  const [selectedQRItem, setSelectedQRItem] = useState(null);
+  const [isAuthenticatorViewOpen, setIsAuthenticatorViewOpen] = useState(false);
 
   useEffect(() => {
-    const savedProfiles = localStorage.getItem('ciphervault_profiles');
-    let profList = ['Default'];
-    if (savedProfiles) {
-      try {
-        profList = JSON.parse(savedProfiles);
-      } catch (e) {}
-    }
-    setProfiles(profList);
-
-    const savedSettings = localStorage.getItem('ciphervault_settings');
-    if (savedSettings) {
-      try {
-        setSettings(JSON.parse(savedSettings));
-      } catch (e) {}
-    }
-
-    const activeProf = localStorage.getItem('ciphervault_active_profile') || 'Default';
-    setCurrentProfile(activeProf);
-    checkProfileState(activeProf);
-  }, []);
-
-  const handleSaveSettings = (newSettings, persist = true) => {
-    setSettings(newSettings);
-    if (persist) {
-      localStorage.setItem('ciphervault_settings', JSON.stringify(newSettings));
-      setSuccessMsg('Vault preferences saved successfully!');
-    }
-  };
-
-  const checkProfileState = (prof) => {
-    const pfx = prof === 'Default' ? '' : `_${prof}`;
-    const savedSalt = localStorage.getItem(`ciphervault_salt${pfx}`);
-    const savedCipher = localStorage.getItem(`ciphervault_vault${pfx}`);
-    if (!savedSalt || !savedCipher) {
-      setView('setup');
+    if (mode === 'system') {
+      const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const updateSystemMode = (e) => setResolvedMode(e.matches ? 'dark' : 'light');
+      setResolvedMode(darkQuery.matches ? 'dark' : 'light');
+      darkQuery.addEventListener('change', updateSystemMode);
+      return () => darkQuery.removeEventListener('change', updateSystemMode);
     } else {
-      setView('unlock');
+      setResolvedMode(mode);
     }
-  };
+  }, [mode]);
 
-  const handleSwitchProfile = (newProf) => {
-    setCurrentProfile(newProf);
-    localStorage.setItem('ciphervault_active_profile', newProf);
-    setKey(null);
-    setVaultItems([]);
-    setTrashItems([]);
-    checkProfileState(newProf);
-  };
-
-  const handleCreateProfile = (name) => {
-    const pfx = name === 'Default' ? '' : `_${name}`;
-    const existingSalt = localStorage.getItem(`ciphervault_salt${pfx}`);
-    if (profiles.includes(name) || existingSalt) {
-      alert('A vault already exists for this username/profile! Each username can only have 1 vault. If you want another vault, please use a new unique username.');
-      return;
-    }
-    const updated = [...profiles, name];
-    setProfiles(updated);
-    localStorage.setItem('ciphervault_profiles', JSON.stringify(updated));
-    handleSwitchProfile(name);
-    setOpenProfileManager(false);
-    setSuccessMsg(`Created and switched to profile [${name}]`);
-  };
-
-  const handleRenameProfile = (oldName, newName) => {
-    if (profiles.includes(newName)) {
-      alert('A profile with this name already exists.');
-      return;
-    }
-    const newPfx = newName === 'Default' ? '' : `_${newName}`;
-    const oldPfx = oldName === 'Default' ? '' : `_${oldName}`;
-
-    // Check if newName already has localStorage data
-    if (localStorage.getItem(`ciphervault_salt${newPfx}`)) {
-      alert('A vault already exists for the target profile name!');
-      return;
-    }
-
-    // Migrate localStorage keys
-    const salt = localStorage.getItem(`ciphervault_salt${oldPfx}`);
-    const vault = localStorage.getItem(`ciphervault_vault${oldPfx}`);
-    const recovery = localStorage.getItem(`ciphervault_recovery${oldPfx}`);
-    const hint = localStorage.getItem(`ciphervault_hint${oldPfx}`);
-
-    if (salt) localStorage.setItem(`ciphervault_salt${newPfx}`, salt);
-    if (vault) localStorage.setItem(`ciphervault_vault${newPfx}`, vault);
-    if (recovery) localStorage.setItem(`ciphervault_recovery${newPfx}`, recovery);
-    if (hint) localStorage.setItem(`ciphervault_hint${newPfx}`, hint);
-
-    // Remove old keys
-    localStorage.removeItem(`ciphervault_salt${oldPfx}`);
-    localStorage.removeItem(`ciphervault_vault${oldPfx}`);
-    localStorage.removeItem(`ciphervault_recovery${oldPfx}`);
-    localStorage.removeItem(`ciphervault_hint${oldPfx}`);
-
-    // Update profiles list
-    const updatedProfiles = profiles.map(p => p === oldName ? newName : p);
-    setProfiles(updatedProfiles);
-    localStorage.setItem('ciphervault_profiles', JSON.stringify(updatedProfiles));
-
-    if (currentProfile === oldName) {
-      setCurrentProfile(newName);
-      localStorage.setItem('ciphervault_active_profile', newName);
-    }
-
-    setSuccessMsg(`Successfully renamed profile [${oldName}] to [${newName}]`);
-  };
-
-  const handleDeleteProfile = (name) => {
-    if (profiles.length <= 1) {
-      alert('You must have at least one profile.');
-      return;
-    }
-    if (confirm(`Are you sure you want to delete profile [${name}] and all its data?`)) {
-      const pfx = name === 'Default' ? '' : `_${name}`;
-      localStorage.removeItem(`ciphervault_salt${pfx}`);
-      localStorage.removeItem(`ciphervault_vault${pfx}`);
-      localStorage.removeItem(`ciphervault_recovery${pfx}`);
-      localStorage.removeItem(`ciphervault_hint${pfx}`);
-
-      const updated = profiles.filter(p => p !== name);
-      setProfiles(updated);
-      localStorage.setItem('ciphervault_profiles', JSON.stringify(updated));
-      handleSwitchProfile(updated[0]);
-      setSuccessMsg(`Profile [${name}] deleted.`);
-    }
-  };
-
-  const inactivityTimerRef = useRef(null);
-
-  const resetInactivityTimer = () => {
-    if (view === 'vault') {
-      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
-      const timeoutMs = (settings.autoLockMinutes || 10) * 60 * 1000;
-      inactivityTimerRef.current = setTimeout(() => {
-        handleLockVault();
-        setSuccessMsg('Vault locked automatically due to inactivity.');
-      }, timeoutMs);
-    }
-  };
-
+  // Auto-lock inactivity timer
   useEffect(() => {
+    if (viewState !== 'unlocked' || autoLockMinutes <= 0) return;
+    let timeoutId;
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        handleLock();
+      }, autoLockMinutes * 60 * 1000);
+    };
+
     const events = ['mousemove', 'keydown', 'click', 'scroll'];
-    const handleActivity = () => resetInactivityTimer();
-    events.forEach(event => window.addEventListener(event, handleActivity));
-    resetInactivityTimer();
+    events.forEach(event => window.addEventListener(event, resetTimer));
+    resetTimer();
 
     return () => {
-      events.forEach(event => window.removeEventListener(event, handleActivity));
-      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+      if (timeoutId) clearTimeout(timeoutId);
+      events.forEach(event => window.removeEventListener(event, resetTimer));
     };
-  }, [view, settings.autoLockMinutes]);
+  }, [viewState, autoLockMinutes]);
 
-  const pfx = currentProfile === 'Default' ? '' : `_${currentProfile}`;
-
-  const saveVaultToLocalStorage = async (updatedItems, updatedTrash, activeKey) => {
-    const k = activeKey || key;
-    const payload = { items: updatedItems, trash: updatedTrash };
-    const encrypted = await CryptoEngine.encryptPayload(k, JSON.stringify(payload));
-    localStorage.setItem(`ciphervault_vault${pfx}`, JSON.stringify(encrypted));
-    setVaultItems(updatedItems);
-    setTrashItems(updatedTrash);
-  };
-
-  const handleSaveItem = async (newItem) => {
-    let updated = [...vaultItems];
-    const index = updated.findIndex(i => i.id === newItem.id);
-    if (index >= 0) {
-      updated[index] = newItem;
-    } else {
-      updated.push(newItem);
-    }
-    await saveVaultToLocalStorage(updated, trashItems);
-    setSuccessMsg('Vault item saved successfully!');
-  };
-
-  const handleDeleteItem = async (id) => {
-    const itemToDelete = vaultItems.find(i => i.id === id);
-    if (!itemToDelete) return;
-    const updatedVault = vaultItems.filter(item => item.id !== id);
-    const updatedTrash = [...trashItems, itemToDelete];
-    await saveVaultToLocalStorage(updatedVault, updatedTrash);
-    setSuccessMsg('Item moved to trash.');
-  };
-
-  const handleRestoreItem = async (id) => {
-    const itemToRestore = trashItems.find(i => i.id === id);
-    if (!itemToRestore) return;
-    const updatedTrash = trashItems.filter(item => item.id !== id);
-    const updatedVault = [...vaultItems, itemToRestore];
-    await saveVaultToLocalStorage(updatedVault, updatedTrash);
-    setSuccessMsg('Item restored from trash.');
-  };
-
-  const handleDeletePermanent = async (id) => {
-    if (!confirm('Are you sure you want to permanently delete this item?')) return;
-    const updatedTrash = trashItems.filter(item => item.id !== id);
-    await saveVaultToLocalStorage(vaultItems, updatedTrash);
-    setSuccessMsg('Item permanently deleted.');
-  };
-
-  const handleImportTotpJson = async (data) => {
-    try {
-      let importedCount = 0;
-      let newItems = [...vaultItems];
-      const accounts = Array.isArray(data) ? data : (data.accounts || data.items || []);
-      
-      accounts.forEach(acc => {
-        const name = acc.name || acc.issuer || 'Imported Account';
-        const secret = acc.secret || acc.key || '';
-        const username = acc.username || acc.email || '';
-        if (secret) {
-          newItems.push({
-            id: Date.now().toString() + Math.random(),
-            name: name,
-            username: username,
-            password: '',
-            category: 'Logins',
-            totpSecret: secret,
-            attachment: null,
-            templateData: {},
-            notes: 'Imported via Google Auth QR / 2FAS'
-          });
-          importedCount++;
-        }
-      });
-
-      if (importedCount > 0) {
-        await saveVaultToLocalStorage(newItems, trashItems);
-        setSuccessMsg(`Successfully imported ${importedCount} 2FA accounts!`);
-      } else {
-        alert('No valid accounts found.');
+  const theme = createTheme({
+    palette: {
+      mode: resolvedMode,
+      primary: {
+        main: accentColor
+      },
+      background: {
+        default: resolvedMode === 'dark' ? '#0f172a' : '#f8fafc',
+        paper: resolvedMode === 'dark' ? '#1e293b' : '#ffffff'
       }
-    } catch (err) {
-      alert('Import error: ' + err.message);
+    },
+    typography: {
+      fontFamily: '"Roboto", "Helvetica", "Arial", sans-serif'
     }
+  });
+
+  const handleSetup = async (newUsername, password) => {
+    const cleanUser = newUsername.trim();
+    if (profiles.includes(cleanUser)) {
+      alert(`Profile "${cleanUser}" already exists! Please choose another name or unlock the existing profile.`);
+      return;
+    }
+    const emptyVault = [];
+    const encrypted = await encryptData(emptyVault, password);
+    const updatedProfiles = [...profiles, cleanUser];
+    
+    localStorage.setItem('ciphervault_profiles', JSON.stringify(updatedProfiles));
+    localStorage.setItem(`ciphervault_data_${cleanUser}`, JSON.stringify(encrypted));
+    
+    setProfiles(updatedProfiles);
+    setSelectedUsername(cleanUser);
+    setMasterPassword(password);
+    setVaultItems(emptyVault);
+    setViewState('unlocked');
   };
 
-  const handleImportVaultJson = async (backup) => {
+  const handleSelectProfile = (profile) => {
+    setSelectedUsername(profile);
+    setViewState('unlock');
+  };
+
+  const handleUnlock = (password) => {
     try {
-      localStorage.setItem(`ciphervault_salt${pfx}`, backup.salt);
-      localStorage.setItem(`ciphervault_vault${pfx}`, JSON.stringify(backup.vault));
-      if (backup.hint) localStorage.setItem(`ciphervault_hint${pfx}`, backup.hint);
-      if (backup.recovery) localStorage.setItem(`ciphervault_recovery${pfx}`, backup.recovery);
-      alert('Vault backup imported successfully! Please unlock with your master password.');
-      window.location.reload();
+      const storedData = JSON.parse(localStorage.getItem(`ciphervault_data_${selectedUsername}`));
+      if (!storedData) return false;
+      decryptData(storedData, password).then(decrypted => {
+        setMasterPassword(password);
+        setVaultItems(decrypted);
+        setViewState('unlocked');
+      }).catch(() => {
+        alert('Incorrect master password.');
+      });
+      return true;
     } catch (err) {
-      alert('Failed to import vault backup: ' + err.message);
+      return false;
     }
   };
 
-  const handleLockVault = () => {
-    setKey(null);
+  const handleLock = () => {
+    setMasterPassword('');
     setVaultItems([]);
-    setTrashItems([]);
-    setView('unlock');
-    setSuccessMsg('Vault locked successfully.');
+    setViewState('unlock');
+  };
+
+  const handleSwitchProfile = () => {
+    setMasterPassword('');
+    setVaultItems([]);
+    setSelectedUsername('');
+    setViewState(profiles.length > 0 ? 'select_profile' : 'setup');
+  };
+
+  const saveVaultChanges = async (newItems) => {
+    setVaultItems(newItems);
+    try {
+      const encrypted = await encryptData(newItems, masterPassword);
+      localStorage.setItem(`ciphervault_data_${selectedUsername}`, JSON.stringify(encrypted));
+    } catch (err) {
+      console.error('Failed to save vault:', err);
+    }
+  };
+
+  const handleSaveItem = (item) => {
+    const exists = vaultItems.some(i => i.id === item.id);
+    let updated;
+    if (exists) {
+      updated = vaultItems.map(i => i.id === item.id ? item : i);
+    } else {
+      updated = [item, ...vaultItems];
+    }
+    saveVaultChanges(updated);
+  };
+
+  const handleDeleteItem = (id) => {
+    const updated = vaultItems.filter(i => i.id !== id);
+    saveVaultChanges(updated);
+  };
+
+  const handleDeleteProfile = (profileToDelete) => {
+    if (window.confirm(`Are you sure you want to delete profile "${profileToDelete}" and all its vault data?`)) {
+      const updatedProfiles = profiles.filter(p => p !== profileToDelete);
+      localStorage.setItem('ciphervault_profiles', JSON.stringify(updatedProfiles));
+      localStorage.removeItem(`ciphervault_data_${profileToDelete}`);
+      setProfiles(updatedProfiles);
+      if (selectedUsername === profileToDelete) {
+        setSelectedUsername('');
+        setViewState(updatedProfiles.length > 0 ? 'select_profile' : 'setup');
+      }
+    }
+  };
+
+  const handleRenameProfile = (newUsername) => {
+    const cleanUser = newUsername.trim();
+    if (!cleanUser || cleanUser === selectedUsername) return;
+    if (profiles.includes(cleanUser)) {
+      alert(`Profile name "${cleanUser}" is already taken.`);
+      return;
+    }
+    const data = localStorage.getItem(`ciphervault_data_${selectedUsername}`);
+    const updatedProfiles = profiles.map(p => p === selectedUsername ? cleanUser : p);
+    
+    localStorage.setItem('ciphervault_profiles', JSON.stringify(updatedProfiles));
+    localStorage.setItem(`ciphervault_data_${cleanUser}`, data);
+    localStorage.removeItem(`ciphervault_data_${selectedUsername}`);
+
+    setProfiles(updatedProfiles);
+    setSelectedUsername(cleanUser);
+  };
+
+  const handleDeleteCurrentVault = (password) => {
+    try {
+      const storedData = JSON.parse(localStorage.getItem(`ciphervault_data_${selectedUsername}`));
+      decryptData(storedData, password).then(() => {
+        handleDeleteProfile(selectedUsername);
+        setIsProfileOpen(false);
+      }).catch(() => {
+        alert('Incorrect master password.');
+      });
+      return true;
+    } catch (err) {
+      return false;
+    }
+  };
+
+  const backgroundStyle = useGradient ? {
+    background: resolvedMode === 'dark'
+      ? 'radial-gradient(circle at 20% 20%, #312e81 0%, #1e1b4b 40%, #0f172a 90%)'
+      : 'radial-gradient(circle at 20% 20%, #e0e7ff 0%, #c7d2fe 45%, #f8fafc 90%)'
+  } : {
+    bgcolor: 'background.default'
   };
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
-        <Navbar 
-          mode={mode} 
-          setMode={setMode} 
-          unlocked={view === 'vault'} 
-          onLock={handleLockVault}
-          onOpenAuditor={() => setOpenAuditor(true)}
-          onOpenExport={() => setOpenExport(true)}
-          trashCount={trashItems.length}
-          onOpenTrash={() => setOpenTrash(true)}
-          profiles={profiles}
-          currentProfile={currentProfile}
-          onSwitchProfile={handleSwitchProfile}
-          onOpenProfileManager={() => setOpenProfileManager(true)}
-          onOpenSettings={() => setOpenSettings(true)}
-          onLogoClick={() => {
-            if (key) {
-              setView('vault');
-            } else {
-              checkProfileState(currentProfile);
-            }
-          }}
-        />
-
-        <Container component="main" maxWidth="md" sx={{ mt: 6, mb: 6, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          {successMsg && (
-            <Snackbar 
-              open 
-              autoHideDuration={4000} 
-              onClose={() => setSuccessMsg('')} 
-              message={successMsg} 
-              anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-            />
-          )}
-
-          {view === 'setup' && (
-            <SetupView profileName={currentProfile} onSetupSuccess={() => {
-              const savedSalt = localStorage.getItem(`ciphervault_salt${pfx}`);
-              const savedCipher = localStorage.getItem(`ciphervault_vault${pfx}`);
-              CryptoEngine.deriveMasterKey(localStorage.getItem('ciphervault_temp_pw') || '', savedSalt).then(async k => {
-                const dec = await CryptoEngine.decryptPayload(k, JSON.parse(savedCipher));
-                const parsed = JSON.parse(dec);
-                setKey(k);
-                setVaultItems(parsed.items || []);
-                setTrashItems(parsed.trash || []);
-                setView('vault');
-              }).catch(() => {
-                setView('unlock');
-              });
-            }} />
-          )}
-
-          {view === 'unlock' && (
-            <UnlockView 
-              profileName={currentProfile}
-              onUnlockSuccess={(derivedKey, items, trash) => {
-                setKey(derivedKey);
-                setVaultItems(items);
-                setTrashItems(trash);
-                setView('vault');
-              }}
-              onSwitchToSetup={() => setView('setup')}
-              onOpenAuthenticatorOnly={() => setView('authenticator_only')}
-            />
-          )}
-
-          {view === 'authenticator_only' && (
-            <AuthenticatorOnlyView 
-              onBackToLogin={() => checkProfileState(currentProfile)}
-              settings={settings}
-            />
-          )}
-
-          {view === 'vault' && (
-            <VaultDashboard 
-              vaultItems={vaultItems}
-              trashItems={trashItems}
-              onSaveItem={handleSaveItem} 
-              onDeleteItem={handleDeleteItem}
-              onRestoreItem={handleRestoreItem}
-              onDeletePermanent={handleDeletePermanent}
-              profiles={profiles}
-              currentProfile={currentProfile}
+      <Box sx={{ minHeight: '100vh', ...backgroundStyle }}>
+        {viewState === 'setup' ? (
+          <SetupView onSetup={handleSetup} />
+        ) : viewState === 'select_profile' ? (
+          <ProfileSelectionView
+            profiles={profiles}
+            onSelectProfile={handleSelectProfile}
+            onCreateNewProfile={() => setViewState('setup')}
+            onDeleteProfile={handleDeleteProfile}
+          />
+        ) : viewState === 'unlock' ? (
+          <UnlockView
+            username={selectedUsername}
+            onUnlock={handleUnlock}
+            onResetVault={() => handleSwitchProfile()}
+          />
+        ) : (
+          <>
+            <Navbar
+              username={selectedUsername}
+              mode={resolvedMode}
+              setMode={setMode}
+              onLock={handleLock}
               onSwitchProfile={handleSwitchProfile}
-              onCreateProfile={handleCreateProfile}
-              onDeleteProfile={handleDeleteProfile}
-              onImportTotpJson={handleImportTotpJson}
-              onImportVaultJson={handleImportVaultJson}
-              activeKey={key}
-              settings={settings}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenAuditor={() => setIsAuditorOpen(true)}
+              onOpenExport={() => setIsExportOpen(true)}
+              onOpenTrash={() => setIsTrashOpen(true)}
+              onOpenProfile={() => setIsProfileOpen(true)}
+              onOpenAuthenticatorView={() => setIsAuthenticatorViewOpen(true)}
+              accentColor={accentColor}
             />
-          )}
-        </Container>
 
-        <SecurityAuditorModal
-          open={openAuditor}
-          onClose={() => setOpenAuditor(false)}
-          vaultItems={vaultItems}
-        />
+            {isAuthenticatorViewOpen ? (
+              <AuthenticatorOnlyView vaultItems={vaultItems} onBack={() => setIsAuthenticatorViewOpen(false)} />
+            ) : (
+              <VaultDashboard
+                vaultItems={vaultItems}
+                onAddItem={() => { setEditingItem(null); setIsItemModalOpen(true); }}
+                onEditItem={(item) => { setEditingItem(item); setIsItemModalOpen(true); }}
+                onDeleteItem={handleDeleteItem}
+                onOpenHistory={(item) => { setEditingItem(item); setIsHistoryOpen(true); }}
+                onOpenQR={(item) => { setSelectedQRItem(item); setIsQROpen(true); }}
+              />
+            )}
 
-        <ExportModal
-          open={openExport}
-          onClose={() => setOpenExport(false)}
-          profileName={currentProfile}
-        />
+            <ItemModal
+              open={isItemModalOpen}
+              onClose={() => setIsItemModalOpen(false)}
+              onSave={handleSaveItem}
+              editingItem={editingItem}
+            />
 
-        <TrashModal
-          open={openTrash}
-          onClose={() => setOpenTrash(false)}
-          trashItems={trashItems}
-          onRestore={handleRestoreItem}
-          onDeletePermanent={handleDeletePermanent}
-        />
+            <SecurityAuditorModal
+              open={isAuditorOpen}
+              onClose={() => setIsAuditorOpen(false)}
+              vaultItems={vaultItems}
+            />
 
-        <ProfileManagerModal
-          open={openProfileManager}
-          onClose={() => setOpenProfileManager(false)}
-          profiles={profiles}
-          currentProfile={currentProfile}
-          onSwitchProfile={handleSwitchProfile}
-          onCreateProfile={handleCreateProfile}
-          onDeleteProfile={handleDeleteProfile}
-          onRenameProfile={handleRenameProfile}
-        />
+            <ExportModal
+              open={isExportOpen}
+              onClose={() => setIsExportOpen(false)}
+              vaultItems={vaultItems}
+              onImport={(imported) => saveVaultChanges([...imported, ...vaultItems])}
+            />
 
-        <SettingsModal
-          open={openSettings}
-          onClose={() => setOpenSettings(false)}
-          settings={settings}
-          onSaveSettings={handleSaveSettings}
-          currentProfile={currentProfile}
-          onDeleteProfile={handleDeleteProfile}
-        />
+            <TrashModal
+              open={isTrashOpen}
+              onClose={() => setIsTrashOpen(false)}
+            />
+
+            <ProfileManagerModal
+              open={isProfileOpen}
+              onClose={() => setIsProfileOpen(false)}
+              username={selectedUsername}
+              onRenameProfile={handleRenameProfile}
+              onDeleteVault={handleDeleteCurrentVault}
+            />
+
+            <SettingsModal
+              open={isSettingsOpen}
+              onClose={() => setIsSettingsOpen(false)}
+              mode={mode}
+              setMode={setMode}
+              accentColor={accentColor}
+              setAccentColor={setAccentColor}
+              useGradient={useGradient}
+              setUseGradient={setUseGradient}
+              autoLockMinutes={autoLockMinutes}
+              setAutoLockMinutes={setAutoLockMinutes}
+            />
+
+            <PasswordHistoryModal
+              open={isHistoryOpen}
+              onClose={() => setIsHistoryOpen(false)}
+              selectedItem={editingItem}
+            />
+
+            <TOTPWidget
+              open={isQROpen}
+              onClose={() => setIsQROpen(false)}
+              selectedItem={selectedQRItem}
+            />
+          </>
+        )}
       </Box>
     </ThemeProvider>
   );

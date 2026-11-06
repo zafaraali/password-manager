@@ -1,139 +1,101 @@
 import React, { useState } from 'react';
-import { Paper, Typography, TextField, Button, Box, Alert } from '@mui/material';
-import { CryptoEngine } from '../utils/crypto';
+import { Box, Paper, Typography, TextField, Button, Alert, LinearProgress } from '@mui/material';
+import VpnKeyIcon from '@mui/icons-material/VpnKey';
 
-export default function SetupView({ onSetupSuccess, profileName }) {
-  const [password, setPassword] = useState('');
+export default function SetupView({ onSetup }) {
+  const [username, setUsername] = useState('');
+  const [masterPassword, setMasterPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [hint, setHint] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [generatedRecoveryCode, setGeneratedRecoveryCode] = useState('');
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!password) {
-      setError('Master password is required');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-    if (password.length < 8) {
-      setError('Master password must be at least 8 characters long');
-      return;
-    }
+  const calculateStrength = (pwd) => {
+    if (!pwd) return { score: 0, label: '', color: 'error' };
+    let score = 0;
+    if (pwd.length >= 8) score += 25;
+    if (pwd.length >= 12) score += 25;
+    if (/[A-Z]/.test(pwd) && /[a-z]/.test(pwd)) score += 25;
+    if (/[0-9]/.test(pwd) && /[^A-Za-z0-9]/.test(pwd)) score += 25;
 
-    setLoading(true);
-    setError('');
-    try {
-      const pfx = profileName === 'Default' ? '' : `_${profileName}`;
-      const newSalt = await CryptoEngine.generateSalt();
-      const recoveryCode = await CryptoEngine.generateRecoveryCode();
-      const derivedKey = await CryptoEngine.deriveMasterKey(password, newSalt);
-      
-      const initialItems = [];
-
-      const vaultPayload = { items: initialItems, trash: [] };
-      const encrypted = await CryptoEngine.encryptPayload(derivedKey, JSON.stringify(vaultPayload));
-      
-      localStorage.setItem(`ciphervault_salt${pfx}`, newSalt);
-      localStorage.setItem(`ciphervault_vault${pfx}`, JSON.stringify(encrypted));
-      localStorage.setItem(`ciphervault_recovery${pfx}`, recoveryCode);
-      localStorage.setItem('ciphervault_temp_pw', password);
-      if (hint) localStorage.setItem(`ciphervault_hint${pfx}`, hint);
-
-      setGeneratedRecoveryCode(recoveryCode);
-    } catch (err) {
-      setError('Setup failed: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
+    if (score <= 25) return { score, label: 'Weak', color: 'error' };
+    if (score <= 50) return { score, label: 'Fair', color: 'warning' };
+    if (score <= 75) return { score, label: 'Good', color: 'info' };
+    return { score, label: 'Strong', color: 'success' };
   };
 
-  if (generatedRecoveryCode) {
-    return (
-      <Paper elevation={3} sx={{ p: 4, borderRadius: 3, border: 1, borderColor: 'divider' }}>
-        <Typography variant="h5" gutterBottom sx={{ fontWeight: 600, color: 'success.main' }}>
-          🎉 Vault Created ({profileName})!
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Please save your Emergency Recovery Code. If you ever forget your master password, you can use this code to reset and recover access.
-        </Typography>
-        <Paper sx={{ p: 2, bgcolor: 'action.hover', mb: 3, textAlign: 'center' }}>
-          <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1 }}>
-            {generatedRecoveryCode}
-          </Typography>
-        </Paper>
-        <Button
-          fullWidth
-          variant="contained"
-          size="large"
-          onClick={() => {
-            navigator.clipboard.writeText(generatedRecoveryCode);
-            alert('Recovery code copied to clipboard!');
-            onSetupSuccess();
-          }}
-          sx={{ py: 1.5, fontWeight: 600, color: '#fff' }}
-        >
-          I Have Saved My Recovery Code — Continue to Vault
-        </Button>
-      </Paper>
-    );
-  }
+  const strength = calculateStrength(masterPassword);
+
+  const handleCreate = (e) => {
+    e.preventDefault();
+    if (!username.trim()) {
+      setError('Please enter a username.');
+      return;
+    }
+    if (masterPassword.length < 8) {
+      setError('Master password must be at least 8 characters long.');
+      return;
+    }
+    if (masterPassword !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+    onSetup(username.trim(), masterPassword);
+  };
 
   return (
-    <Paper elevation={3} sx={{ p: 4, borderRadius: 3, border: 1, borderColor: 'divider' }}>
-      <Typography variant="h5" gutterBottom sx={{ fontWeight: 600 }}>
-        Set Up Vault for [{profileName}]
-      </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Create a strong master password. This password derives your encryption key locally using PBKDF2 with 600,000 iterations.
-      </Typography>
+    <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2, bgcolor: 'background.default' }}>
+      <Paper elevation={3} sx={{ p: 4, width: '100%', maxWidth: 420, borderRadius: 3, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <Box sx={{ width: 54, height: 54, borderRadius: 3, bgcolor: 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', mb: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+          <VpnKeyIcon fontSize="large" />
+        </Box>
+        <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>
+          Create Your Vault
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3, textAlign: 'center' }}>
+          CipherVault encrypts all your credentials locally with AES-256-GCM and 600k PBKDF2 iterations.
+        </Typography>
 
-      {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ width: '100%', mb: 2 }}>{error}</Alert>}
 
-      <Box component="form" onSubmit={handleSubmit} noValidate>
-        <TextField
-          margin="normal"
-          required
-          fullWidth
-          label="Master Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoFocus
-        />
-        <TextField
-          margin="normal"
-          required
-          fullWidth
-          label="Confirm Master Password"
-          type="password"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-        />
-        <TextField
-          margin="normal"
-          fullWidth
-          label="Password Hint (Optional)"
-          type="text"
-          value={hint}
-          onChange={(e) => setHint(e.target.value)}
-          sx={{ mb: 3 }}
-        />
-        <Button
-          type="submit"
-          fullWidth
-          variant="contained"
-          size="large"
-          disabled={loading}
-          sx={{ py: 1.5, fontWeight: 600, textTransform: 'none', fontSize: '1rem', color: '#fff' }}
-        >
-          {loading ? 'Initializing Vault & Deriving Key...' : 'Create Vault & Generate Recovery Code'}
-        </Button>
-      </Box>
-    </Paper>
+        <Box component="form" onSubmit={handleCreate} sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <TextField
+            label="Username / Profile Name"
+            fullWidth
+            required
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+          <TextField
+            label="Master Password"
+            type="password"
+            fullWidth
+            required
+            value={masterPassword}
+            onChange={(e) => setMasterPassword(e.target.value)}
+          />
+          {masterPassword && (
+            <Box sx={{ width: '100%', mt: -1 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography variant="caption" color="text.secondary">Password Strength:</Typography>
+                <Typography variant="caption" sx={{ fontWeight: 700 }} color={`${strength.color}.main`}>
+                  {strength.label}
+                </Typography>
+              </Box>
+              <LinearProgress variant="determinate" value={strength.score} color={strength.color} sx={{ height: 6, borderRadius: 3 }} />
+            </Box>
+          )}
+          <TextField
+            label="Confirm Master Password"
+            type="password"
+            fullWidth
+            required
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+          <Button type="submit" variant="contained" size="large" sx={{ mt: 1, textTransform: 'none', borderRadius: 2, py: 1.5, fontWeight: 600 }}>
+            Initialize Vault
+          </Button>
+        </Box>
+      </Paper>
+    </Box>
   );
 }

@@ -1,59 +1,57 @@
 import React from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, Paper, Chip } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography, Box, Alert } from '@mui/material';
+import SecurityIcon from '@mui/icons-material/Security';
 
 export default function SecurityAuditorModal({ open, onClose, vaultItems }) {
-  const analysis = vaultItems.map(item => {
-    const pwd = item.password || '';
-    let score = 'Strong';
-    let color = 'success';
-    let issues = [];
+  const passwords = vaultItems.filter(i => i.password).map(i => i.password);
+  const weakPasswords = passwords.filter(p => p.length < 8);
+  const duplicatePasswords = passwords.filter((p, index) => passwords.indexOf(p) !== index);
 
-    if (item.category === 'Crypto' || item.category === 'SSH' || item.category === 'Notes') {
-      return { ...item, score: 'Secure', color: 'success', issues: ['Specialized Template Item'] };
-    }
-
-    if (pwd.length < 8) {
-      issues.push('Too short (< 8 chars)');
-      score = 'Weak';
-      color = 'error';
-    } else if (!/[A-Z]/.test(pwd) || !/[0-9]/.test(pwd)) {
-      issues.push('Missing uppercase or number');
-      score = 'Fair';
-      color = 'warning';
-    }
-
-    return { ...item, score, color, issues };
+  const now = Date.now();
+  const agingPasswords = vaultItems.filter(i => {
+    if (!i.password || !i.createdAt) return false;
+    const ageDays = (now - i.createdAt) / (1000 * 60 * 60 * 24);
+    return ageDays > 90;
   });
-
-  const weakCount = analysis.filter(i => i.score === 'Weak').length;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ fontWeight: 600 }}>🛡️ Security Audit Report</DialogTitle>
-      <DialogContent dividers>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Paper sx={{ p: 2, bgcolor: 'action.hover', borderRadius: 2 }}>
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              Audit Summary: {vaultItems.length} items analyzed. 
-              {weakCount > 0 ? ` ⚠️ ${weakCount} weak passwords found.` : ' ✨ All passwords meet good standards.'}
-            </Typography>
-          </Paper>
+      <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <SecurityIcon color="primary" /> Security Auditor
+      </DialogTitle>
+      <DialogContent sx={{ overflowY: 'visible', display: 'flex', flexDirection: 'column', gap: 2, pt: '8px !important' }}>
+        <Typography variant="body2" color="text.secondary">
+          Analysis of your vault items for potential security vulnerabilities and credential hygiene.
+        </Typography>
 
-          {analysis.map(item => (
-            <Paper key={item.id} sx={{ p: 2, border: 1, borderColor: 'divider', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Box>
-                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{item.name}</Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {item.issues.length > 0 ? item.issues.join(', ') : 'No security issues detected'}
-                </Typography>
-              </Box>
-              <Chip label={item.score} color={item.color} size="small" />
-            </Paper>
-          ))}
-        </Box>
+        {weakPasswords.length > 0 ? (
+          <Alert severity="warning">
+            Found <b>{weakPasswords.length}</b> weak passwords (less than 8 characters).
+          </Alert>
+        ) : (
+          <Alert severity="success">No weak passwords detected.</Alert>
+        )}
+
+        {duplicatePasswords.length > 0 ? (
+          <Alert severity="error">
+            Found <b>{duplicatePasswords.length}</b> reused passwords across multiple items.
+          </Alert>
+        ) : (
+          <Alert severity="success">No reused passwords detected.</Alert>
+        )}
+
+        {agingPasswords.length > 0 ? (
+          <Alert severity="info">
+            Found <b>{agingPasswords.length}</b> passwords older than 90 days. Consider rotating them.
+          </Alert>
+        ) : (
+          <Alert severity="success">All passwords are fresh (under 90 days old).</Alert>
+        )}
       </DialogContent>
       <DialogActions sx={{ p: 2 }}>
-        <Button onClick={onClose} variant="contained">Close</Button>
+        <Button onClick={onClose} variant="contained" sx={{ textTransform: 'none', borderRadius: 2 }}>
+          Close
+        </Button>
       </DialogActions>
     </Dialog>
   );
