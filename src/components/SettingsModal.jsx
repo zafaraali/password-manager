@@ -1,20 +1,82 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, FormControlLabel, Switch, Slider, TextField, Divider, ToggleButton, ToggleButtonGroup } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, FormControlLabel, Switch, Slider, TextField, Divider, Alert } from '@mui/material';
+import { CryptoEngine } from '../utils/crypto';
 
-export default function SettingsModal({ open, onClose, settings, onSaveSettings }) {
+export default function SettingsModal({ open, onClose, settings, onSaveSettings, currentProfile, onDeleteProfile }) {
   const [localSettings, setLocalSettings] = useState(settings);
+  const [originalAccent, setOriginalAccent] = useState(settings.accentColor);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
-    setLocalSettings(settings);
+    if (open) {
+      setLocalSettings(settings);
+      setOriginalAccent(settings.accentColor);
+      setDeletePassword('');
+      setDeleteError('');
+    }
   }, [settings, open]);
 
   const handleChange = (key, value) => {
-    setLocalSettings(prev => ({ ...prev, [key]: value }));
+    setLocalSettings(prev => {
+      const updated = { ...prev, [key]: value };
+      if (key === 'accentColor') {
+        onSaveSettings(updated, false);
+      }
+      return updated;
+    });
+  };
+
+  const handleColorSelect = (colorValue) => {
+    setLocalSettings(prev => {
+      const updated = { ...prev, accentColor: colorValue };
+      onSaveSettings(updated, false);
+      return updated;
+    });
   };
 
   const handleSave = () => {
-    onSaveSettings(localSettings);
+    onSaveSettings(localSettings, true);
     onClose();
+  };
+
+  const handleClose = () => {
+    if (localSettings.accentColor !== originalAccent) {
+      onSaveSettings({ ...localSettings, accentColor: originalAccent }, false);
+    }
+    onClose();
+  };
+
+  const handleDeleteVaultSubmit = async (e) => {
+    e.preventDefault();
+    setDeleteError('');
+    if (!deletePassword) {
+      setDeleteError('Please enter your master password to confirm deletion.');
+      return;
+    }
+
+    try {
+      const pfx = currentProfile === 'Default' ? '' : `_${currentProfile}`;
+      const savedSalt = localStorage.getItem(`ciphervault_salt${pfx}`);
+      const savedCipher = localStorage.getItem(`ciphervault_vault${pfx}`);
+
+      if (!savedSalt || !savedCipher) {
+        // If no vault data, just delete
+        onClose();
+        onDeleteProfile(currentProfile);
+        return;
+      }
+
+      // Verify master password by deriving key and decrypting payload
+      const derivedKey = await CryptoEngine.deriveMasterKey(deletePassword, savedSalt);
+      await CryptoEngine.decryptPayload(derivedKey, JSON.parse(savedCipher));
+
+      // Password verified successfully! Proceed to delete
+      onClose();
+      onDeleteProfile(currentProfile);
+    } catch (err) {
+      setDeleteError('Incorrect master password. Vault deletion aborted.');
+    }
   };
 
   const colorThemes = [
@@ -27,7 +89,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
   ];
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
       <DialogTitle sx={{ fontWeight: 800, fontSize: '1.25rem' }}>⚙️ Vault Preferences & Settings</DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -35,7 +97,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
           {/* Theme & Accent Color */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 700 }}>
-              🎨 App Accent Color
+              🎨 App Accent Color (Live Preview)
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
               {colorThemes.map(theme => {
@@ -44,7 +106,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
                   <Button
                     key={theme.value}
                     variant={isSelected ? 'contained' : 'outlined'}
-                    onClick={() => handleChange('accentColor', theme.value)}
+                    onClick={() => handleColorSelect(theme.value)}
                     sx={{
                       textTransform: 'none',
                       fontWeight: 600,
@@ -82,9 +144,6 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
               }
               label="Show Next 2FA Code Automatically (Skip Toggle Button)"
             />
-            <Typography variant="caption" color="text.secondary" display="block">
-              When enabled, your TOTP widgets show both current and upcoming codes side-by-side automatically.
-            </Typography>
           </Box>
 
           <Divider />
@@ -94,7 +153,6 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
             <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>
               🔐 Password Generator Defaults
             </Typography>
-            
             <Box>
               <Typography variant="body2" gutterBottom>
                 Default Password Length: <strong>{localSettings.passwordLength || 16}</strong> chars
@@ -109,45 +167,6 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
                 valueLabelDisplay="auto"
               />
             </Box>
-
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={localSettings.genUppercase !== false}
-                    onChange={(e) => handleChange('genUppercase', e.target.checked)}
-                  />
-                }
-                label="Include Uppercase Letters (A-Z)"
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={localSettings.genLowercase !== false}
-                    onChange={(e) => handleChange('genLowercase', e.target.checked)}
-                  />
-                }
-                label="Include Lowercase Letters (a-z)"
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={localSettings.genNumbers !== false}
-                    onChange={(e) => handleChange('genNumbers', e.target.checked)}
-                  />
-                }
-                label="Include Numbers (0-9)"
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={localSettings.genSymbols !== false}
-                    onChange={(e) => handleChange('genSymbols', e.target.checked)}
-                  />
-                }
-                label="Include Symbols (!@#$%^&*)"
-              />
-            </Box>
           </Box>
 
           <Divider />
@@ -157,7 +176,6 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
             <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>
               🛡️ Security & Clipboard
             </Typography>
-            
             <TextField
               label="Clipboard Auto-Clear Timeout (Seconds)"
               type="number"
@@ -165,9 +183,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
               value={localSettings.clipboardTimeout || 30}
               onChange={(e) => handleChange('clipboardTimeout', parseInt(e.target.value) || 30)}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
-              helperText="Time before copied passwords are wiped from system clipboard."
             />
-
             <TextField
               label="Auto-Lock Inactivity Timeout (Minutes)"
               type="number"
@@ -175,14 +191,49 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
               value={localSettings.autoLockMinutes || 10}
               onChange={(e) => handleChange('autoLockMinutes', parseInt(e.target.value) || 10)}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
-              helperText="Locks vault automatically after period of inactivity."
             />
+          </Box>
+
+          <Divider />
+
+          {/* Danger Zone: Password-Protected Delete Vault */}
+          <Box component="form" onSubmit={handleDeleteVaultSubmit} sx={{ p: 2.5, border: 1, borderColor: 'error.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Typography variant="subtitle2" color="error" sx={{ fontWeight: 700 }}>
+              ⚠️ Danger Zone: Password-Protected Vault Deletion
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Permanently delete vault [{currentProfile}] and all stored data. Enter your master password to authorize this action.
+            </Typography>
+
+            {deleteError && <Alert severity="error">{deleteError}</Alert>}
+
+            <TextField
+              label="Enter Master Password to Confirm"
+              type="password"
+              size="small"
+              required
+              value={deletePassword}
+              onChange={(e) => setDeletePassword(e.target.value)}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+            />
+
+            <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
+              <Button
+                type="submit"
+                variant="contained"
+                color="error"
+                size="small"
+                sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2 }}
+              >
+                Permanently Delete Vault [{currentProfile}]
+              </Button>
+            </Box>
           </Box>
 
         </Box>
       </DialogContent>
       <DialogActions sx={{ p: 2.5 }}>
-        <Button onClick={onClose} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>Cancel</Button>
+        <Button onClick={handleClose} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>Cancel</Button>
         <Button onClick={handleSave} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Save Preferences</Button>
       </DialogActions>
     </Dialog>

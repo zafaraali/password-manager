@@ -84,10 +84,12 @@ export default function App() {
     checkProfileState(activeProf);
   }, []);
 
-  const handleSaveSettings = (newSettings) => {
+  const handleSaveSettings = (newSettings, persist = true) => {
     setSettings(newSettings);
-    localStorage.setItem('ciphervault_settings', JSON.stringify(newSettings));
-    setSuccessMsg('Vault preferences saved successfully!');
+    if (persist) {
+      localStorage.setItem('ciphervault_settings', JSON.stringify(newSettings));
+      setSuccessMsg('Vault preferences saved successfully!');
+    }
   };
 
   const checkProfileState = (prof) => {
@@ -123,6 +125,50 @@ export default function App() {
     handleSwitchProfile(name);
     setOpenProfileManager(false);
     setSuccessMsg(`Created and switched to profile [${name}]`);
+  };
+
+  const handleRenameProfile = (oldName, newName) => {
+    if (profiles.includes(newName)) {
+      alert('A profile with this name already exists.');
+      return;
+    }
+    const newPfx = newName === 'Default' ? '' : `_${newName}`;
+    const oldPfx = oldName === 'Default' ? '' : `_${oldName}`;
+
+    // Check if newName already has localStorage data
+    if (localStorage.getItem(`ciphervault_salt${newPfx}`)) {
+      alert('A vault already exists for the target profile name!');
+      return;
+    }
+
+    // Migrate localStorage keys
+    const salt = localStorage.getItem(`ciphervault_salt${oldPfx}`);
+    const vault = localStorage.getItem(`ciphervault_vault${oldPfx}`);
+    const recovery = localStorage.getItem(`ciphervault_recovery${oldPfx}`);
+    const hint = localStorage.getItem(`ciphervault_hint${oldPfx}`);
+
+    if (salt) localStorage.setItem(`ciphervault_salt${newPfx}`, salt);
+    if (vault) localStorage.setItem(`ciphervault_vault${newPfx}`, vault);
+    if (recovery) localStorage.setItem(`ciphervault_recovery${newPfx}`, recovery);
+    if (hint) localStorage.setItem(`ciphervault_hint${newPfx}`, hint);
+
+    // Remove old keys
+    localStorage.removeItem(`ciphervault_salt${oldPfx}`);
+    localStorage.removeItem(`ciphervault_vault${oldPfx}`);
+    localStorage.removeItem(`ciphervault_recovery${oldPfx}`);
+    localStorage.removeItem(`ciphervault_hint${oldPfx}`);
+
+    // Update profiles list
+    const updatedProfiles = profiles.map(p => p === oldName ? newName : p);
+    setProfiles(updatedProfiles);
+    localStorage.setItem('ciphervault_profiles', JSON.stringify(updatedProfiles));
+
+    if (currentProfile === oldName) {
+      setCurrentProfile(newName);
+      localStorage.setItem('ciphervault_active_profile', newName);
+    }
+
+    setSuccessMsg(`Successfully renamed profile [${oldName}] to [${newName}]`);
   };
 
   const handleDeleteProfile = (name) => {
@@ -401,6 +447,7 @@ export default function App() {
           onSwitchProfile={handleSwitchProfile}
           onCreateProfile={handleCreateProfile}
           onDeleteProfile={handleDeleteProfile}
+          onRenameProfile={handleRenameProfile}
         />
 
         <SettingsModal
@@ -408,6 +455,8 @@ export default function App() {
           onClose={() => setOpenSettings(false)}
           settings={settings}
           onSaveSettings={handleSaveSettings}
+          currentProfile={currentProfile}
+          onDeleteProfile={handleDeleteProfile}
         />
       </Box>
     </ThemeProvider>

@@ -33,10 +33,7 @@ export default function SetupView({ onSetupSuccess, profileName }) {
       const recoveryCode = await CryptoEngine.generateRecoveryCode();
       const derivedKey = await CryptoEngine.deriveMasterKey(password, newSalt);
       
-      const initialItems = [
-        { id: '1', name: 'Example Login', username: 'user@example.com', password: 'SecurePassword!123', category: 'Logins', notes: 'Welcome to CipherVault!', totpSecret: '', attachment: null, templateData: {} },
-        { id: '2', name: 'Crypto Wallet Seed', username: 'Hardware Wallet', category: 'Crypto', password: '', notes: 'Sample Crypto Template', totpSecret: '', attachment: null, templateData: { seedPhrase: 'abandon ability able about above absent absorb abstract absurd abuse access accident', derivationPath: "m/44'/60'/0'/0/0" } }
-      ];
+      const initialItems = [];
 
       const vaultPayload = { items: initialItems, trash: [] };
       const encrypted = await CryptoEngine.encryptPayload(derivedKey, JSON.stringify(vaultPayload));
