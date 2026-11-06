@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, FormControlLabel, Switch, Slider, TextField, Divider } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, FormControlLabel, Switch, Slider, TextField, Divider, ToggleButton, ToggleButtonGroup } from '@mui/material';
 
 export default function SettingsModal({ open, onClose, settings, onSaveSettings }) {
   const [localSettings, setLocalSettings] = useState(settings);
@@ -17,12 +17,57 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
     onClose();
   };
 
+  const colorThemes = [
+    { label: 'Indigo (Default)', value: '#6366f1' },
+    { label: 'Pure Blue', value: '#2563eb' },
+    { label: 'Emerald Green', value: '#10b981' },
+    { label: 'Sunset Amber', value: '#f59e0b' },
+    { label: 'Ruby Red', value: '#ef4444' },
+    { label: 'Cyber Purple', value: '#a855f7' },
+  ];
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ fontWeight: 600 }}>⚙️ Vault Preferences & Settings</DialogTitle>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
+      <DialogTitle sx={{ fontWeight: 800, fontSize: '1.25rem' }}>⚙️ Vault Preferences & Settings</DialogTitle>
       <DialogContent dividers>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           
+          {/* Theme & Accent Color */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 700 }}>
+              🎨 App Accent Color
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              {colorThemes.map(theme => {
+                const isSelected = (localSettings.accentColor || '#6366f1') === theme.value;
+                return (
+                  <Button
+                    key={theme.value}
+                    variant={isSelected ? 'contained' : 'outlined'}
+                    onClick={() => handleChange('accentColor', theme.value)}
+                    sx={{
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      borderRadius: 3,
+                      borderColor: theme.value,
+                      bgcolor: isSelected ? theme.value : 'transparent',
+                      color: isSelected ? '#fff' : 'text.primary',
+                      '&:hover': {
+                        bgcolor: isSelected ? theme.value : `${theme.value}15`,
+                        borderColor: theme.value
+                      }
+                    }}
+                  >
+                    <Box component="span" sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: theme.value, mr: 1, display: 'inline-block', border: '1px solid #fff' }} />
+                    {theme.label}
+                  </Button>
+                );
+              })}
+            </Box>
+          </Box>
+
+          <Divider />
+
           {/* 2FA Preferences */}
           <Box>
             <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>
@@ -38,7 +83,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
               label="Show Next 2FA Code Automatically (Skip Toggle Button)"
             />
             <Typography variant="caption" color="text.secondary" display="block">
-              When enabled, your TOTP widgets will show both the current and upcoming codes side-by-side or default to the next rolling code.
+              When enabled, your TOTP widgets show both current and upcoming codes side-by-side automatically.
             </Typography>
           </Box>
 
@@ -119,6 +164,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
               size="small"
               value={localSettings.clipboardTimeout || 30}
               onChange={(e) => handleChange('clipboardTimeout', parseInt(e.target.value) || 30)}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               helperText="Time before copied passwords are wiped from system clipboard."
             />
 
@@ -128,15 +174,16 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings 
               size="small"
               value={localSettings.autoLockMinutes || 10}
               onChange={(e) => handleChange('autoLockMinutes', parseInt(e.target.value) || 10)}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               helperText="Locks vault automatically after period of inactivity."
             />
           </Box>
 
         </Box>
       </DialogContent>
-      <DialogActions sx={{ p: 2 }}>
-        <Button onClick={onClose} color="inherit">Cancel</Button>
-        <Button onClick={handleSave} variant="contained" sx={{ color: '#fff' }}>Save Preferences</Button>
+      <DialogActions sx={{ p: 2.5 }}>
+        <Button onClick={onClose} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>Cancel</Button>
+        <Button onClick={handleSave} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Save Preferences</Button>
       </DialogActions>
     </Dialog>
   );

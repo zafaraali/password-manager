@@ -9,14 +9,28 @@ import ExportModal from './components/ExportModal';
 import TrashModal from './components/TrashModal';
 import ProfileManagerModal from './components/ProfileManagerModal';
 import SettingsModal from './components/SettingsModal';
+import AuthenticatorOnlyView from './components/AuthenticatorOnlyView';
 import { CryptoEngine } from './utils/crypto';
 
 export default function App() {
   const [mode, setMode] = useState('dark');
+
+  const [settings, setSettings] = useState({
+    accentColor: '#6366f1',
+    showNextCodeAuto: false,
+    passwordLength: 16,
+    genUppercase: true,
+    genLowercase: true,
+    genNumbers: true,
+    genSymbols: true,
+    clipboardTimeout: 30,
+    autoLockMinutes: 10
+  });
+
   const theme = useMemo(() => createTheme({
     palette: {
       mode: mode,
-      primary: { main: '#6366f1', light: '#818cf8', dark: '#4f46e5' },
+      primary: { main: settings.accentColor || '#6366f1' },
       secondary: { main: '#10b981', light: '#34d399', dark: '#059669' },
       background: {
         default: mode === 'dark' ? '#090d16' : '#f8fafc',
@@ -32,7 +46,7 @@ export default function App() {
       h5: { fontWeight: 700, letterSpacing: '-0.025em' },
       h6: { fontWeight: 600, letterSpacing: '-0.015em' },
     },
-  }), [mode]);
+  }), [mode, settings.accentColor]);
 
   const [profiles, setProfiles] = useState(['Default']);
   const [currentProfile, setCurrentProfile] = useState('Default');
@@ -47,17 +61,6 @@ export default function App() {
   const [openTrash, setOpenTrash] = useState(false);
   const [openProfileManager, setOpenProfileManager] = useState(false);
   const [openSettings, setOpenSettings] = useState(false);
-
-  const [settings, setSettings] = useState({
-    showNextCodeAuto: false,
-    passwordLength: 16,
-    genUppercase: true,
-    genLowercase: true,
-    genNumbers: true,
-    genSymbols: true,
-    clipboardTimeout: 30,
-    autoLockMinutes: 10
-  });
 
   useEffect(() => {
     const savedProfiles = localStorage.getItem('ciphervault_profiles');
@@ -108,8 +111,10 @@ export default function App() {
   };
 
   const handleCreateProfile = (name) => {
-    if (profiles.includes(name)) {
-      alert('Profile already exists.');
+    const pfx = name === 'Default' ? '' : `_${name}`;
+    const existingSalt = localStorage.getItem(`ciphervault_salt${pfx}`);
+    if (profiles.includes(name) || existingSalt) {
+      alert('A vault already exists for this username/profile! Each username can only have 1 vault. If you want another vault, please use a new unique username.');
       return;
     }
     const updated = [...profiles, name];
@@ -289,6 +294,13 @@ export default function App() {
           onSwitchProfile={handleSwitchProfile}
           onOpenProfileManager={() => setOpenProfileManager(true)}
           onOpenSettings={() => setOpenSettings(true)}
+          onLogoClick={() => {
+            if (key) {
+              setView('vault');
+            } else {
+              checkProfileState(currentProfile);
+            }
+          }}
         />
 
         <Container component="main" maxWidth="md" sx={{ mt: 6, mb: 6, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
@@ -329,6 +341,14 @@ export default function App() {
                 setView('vault');
               }}
               onSwitchToSetup={() => setView('setup')}
+              onOpenAuthenticatorOnly={() => setView('authenticator_only')}
+            />
+          )}
+
+          {view === 'authenticator_only' && (
+            <AuthenticatorOnlyView 
+              onBackToLogin={() => checkProfileState(currentProfile)}
+              settings={settings}
             />
           )}
 

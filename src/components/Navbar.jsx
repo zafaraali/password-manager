@@ -9,12 +9,29 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 export default function Navbar({ 
   mode, setMode, unlocked, onLock, onOpenAuditor, onOpenExport, 
   trashCount, onOpenTrash, profiles, currentProfile, onSwitchProfile, onOpenProfileManager,
-  onOpenSettings
+  onOpenSettings, onLogoClick
 }) {
   return (
     <AppBar position="sticky" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: 'background.paper', backdropFilter: 'blur(8px)', color: 'text.primary' }}>
       <Toolbar sx={{ flexWrap: 'wrap', gap: 1, py: 1 }}>
-        <Typography variant="h6" component="div" sx={{ flexGrow: 1, fontWeight: 800, letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: 1.5, background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+        <Typography 
+          variant="h6" 
+          component="div" 
+          onClick={onLogoClick}
+          sx={{ 
+            flexGrow: 1, 
+            fontWeight: 800, 
+            letterSpacing: '-0.02em', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: 1.5, 
+            cursor: 'pointer',
+            '&:hover': { opacity: 0.85 },
+            background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)', 
+            WebkitBackgroundClip: 'text', 
+            WebkitTextFillColor: 'transparent' 
+          }}
+        >
           <Box component="span" sx={{ fontSize: '1.4rem' }}>🔒</Box> CipherVault
         </Typography>
 
