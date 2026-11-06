@@ -1,12 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, FormControlLabel, Switch, Slider, TextField, Divider, Alert } from '@mui/material';
+import { 
+  Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, 
+  FormControlLabel, Switch, Slider, TextField, Divider, Alert 
+} from '@mui/material';
 import { CryptoEngine } from '../utils/crypto';
+import { TOTP } from '../utils/totp';
 
-export default function SettingsModal({ open, onClose, settings, onSaveSettings, currentProfile, onDeleteProfile }) {
+export default function SettingsModal({ open, onClose, settings, onSaveSettings, currentProfile, onDeleteProfile, activeKey }) {
   const [localSettings, setLocalSettings] = useState(settings);
   const [originalAccent, setOriginalAccent] = useState(settings.accentColor);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
+
+  // PIN Unlock state
+  const [pinEnabled, setPinEnabled] = useState(false);
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [pinMsg, setPinMsg] = useState('');
+  const [pinError, setPinError] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -14,8 +25,16 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
       setOriginalAccent(settings.accentColor);
       setDeletePassword('');
       setDeleteError('');
+      setNewPin('');
+      setConfirmPin('');
+      setPinMsg('');
+      setPinError('');
+
+      const pfx = currentProfile === 'Default' ? '' : `_${currentProfile}`;
+      const isPin = localStorage.getItem(`ciphervault_pin_enabled${pfx}`) === 'true';
+      setPinEnabled(isPin);
     }
-  }, [settings, open]);
+  }, [settings, open, currentProfile]);
 
   const handleChange = (key, value) => {
     setLocalSettings(prev => {
@@ -47,6 +66,55 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
     onClose();
   };
 
+  const handleEnablePin = async (e) => {
+    e.preventDefault();
+    setPinError('');
+    setPinMsg('');
+
+    if (!newPin || newPin.length < 4 || newPin.length > 8) {
+      setPinError('PIN must be between 4 and 8 digits.');
+      return;
+    }
+    if (newPin !== confirmPin) {
+      setPinError('PINs do not match.');
+      return;
+    }
+    if (!/^\d+$/.test(newPin)) {
+      setPinError('PIN must contain only numbers (0-9).');
+      return;
+    }
+    if (!activeKey) {
+      setPinError('Vault master key is unavailable. Please unlock vault first.');
+      return;
+    }
+
+    try {
+      const pfx = currentProfile === 'Default' ? '' : `_${currentProfile}`;
+      const pinSalt = await CryptoEngine.generateSalt();
+      const wrapped = await CryptoEngine.wrapMasterKeyWithPin(activeKey, newPin, pinSalt);
+
+      localStorage.setItem(`ciphervault_pin_enabled${pfx}`, 'true');
+      localStorage.setItem(`ciphervault_pin_salt${pfx}`, pinSalt);
+      localStorage.setItem(`ciphervault_pin_wrapped${pfx}`, JSON.stringify(wrapped));
+
+      setPinEnabled(true);
+      setNewPin('');
+      setConfirmPin('');
+      setPinMsg('Quick PIN unlock enabled successfully!');
+    } catch (err) {
+      setPinError('Failed to enable PIN: ' + err.message);
+    }
+  };
+
+  const handleDisablePin = () => {
+    const pfx = currentProfile === 'Default' ? '' : `_${currentProfile}`;
+    localStorage.removeItem(`ciphervault_pin_enabled${pfx}`);
+    localStorage.removeItem(`ciphervault_pin_salt${pfx}`);
+    localStorage.removeItem(`ciphervault_pin_wrapped${pfx}`);
+    setPinEnabled(false);
+    setPinMsg('PIN unlock disabled.');
+  };
+
   const handleDeleteVaultSubmit = async (e) => {
     e.preventDefault();
     setDeleteError('');
@@ -61,17 +129,14 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
       const savedCipher = localStorage.getItem(`ciphervault_vault${pfx}`);
 
       if (!savedSalt || !savedCipher) {
-        // If no vault data, just delete
         onClose();
         onDeleteProfile(currentProfile);
         return;
       }
 
-      // Verify master password by deriving key and decrypting payload
       const derivedKey = await CryptoEngine.deriveMasterKey(deletePassword, savedSalt);
       await CryptoEngine.decryptPayload(derivedKey, JSON.parse(savedCipher));
 
-      // Password verified successfully! Proceed to delete
       onClose();
       onDeleteProfile(currentProfile);
     } catch (err) {
@@ -126,6 +191,75 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
                 );
               })}
             </Box>
+          </Box>
+
+          <Divider />
+
+          {/* Quick PIN Unlock Configuration (Bitwarden & 2FAS Feature) */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 700 }}>
+              ⚡ Quick PIN Unlock (Fast Session Resume)
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Unlock your vault during sessions with a 4–8 digit numeric PIN instead of re-entering your master password every time.
+            </Typography>
+
+            {pinMsg && <Alert severity="success">{pinMsg}</Alert>}
+            {pinError && <Alert severity="error">{pinError}</Alert>}
+
+            {pinEnabled ? (
+              <Box sx={{ p: 2, border: 1, borderColor: 'secondary.main', borderRadius: 3, bgcolor: 'rgba(16, 185, 129, 0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'secondary.main' }}>
+                    ✅ PIN Unlock is Active
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    You can unlock [{currentProfile}] using your numeric PIN.
+                  </Typography>
+                </Box>
+                <Button 
+                  size="small" 
+                  color="error" 
+                  variant="outlined" 
+                  onClick={handleDisablePin}
+                  sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
+                >
+                  Disable PIN
+                </Button>
+              </Box>
+            ) : (
+              <Box component="form" onSubmit={handleEnablePin} sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, p: 2, border: 1, borderColor: 'divider', borderRadius: 3 }}>
+                <Box sx={{ display: 'flex', gap: 1.5 }}>
+                  <TextField
+                    label="4–8 Digit PIN"
+                    type="password"
+                    size="small"
+                    fullWidth
+                    value={newPin}
+                    onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                    placeholder="1234"
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                  <TextField
+                    label="Confirm PIN"
+                    type="password"
+                    size="small"
+                    fullWidth
+                    value={confirmPin}
+                    onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                    placeholder="1234"
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                </Box>
+                <Button 
+                  type="submit" 
+                  variant="contained" 
+                  sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, alignSelf: 'flex-start', color: '#fff' }}
+                >
+                  Enable PIN Unlock
+                </Button>
+              </Box>
+            )}
           </Box>
 
           <Divider />
@@ -208,31 +342,22 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
             {deleteError && <Alert severity="error">{deleteError}</Alert>}
 
             <TextField
-              label="Enter Master Password to Confirm"
+              label="Master Password"
               type="password"
               size="small"
-              required
               value={deletePassword}
               onChange={(e) => setDeletePassword(e.target.value)}
+              placeholder="Enter master password to delete"
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
             />
-
-            <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
-              <Button
-                type="submit"
-                variant="contained"
-                color="error"
-                size="small"
-                sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2 }}
-              >
-                Permanently Delete Vault [{currentProfile}]
-              </Button>
-            </Box>
+            <Button type="submit" variant="contained" color="error" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, alignSelf: 'flex-start' }}>
+              Confirm & Delete Vault Permanently
+            </Button>
           </Box>
 
         </Box>
       </DialogContent>
-      <DialogActions sx={{ p: 2.5 }}>
+      <DialogActions sx={{ p: 2.5, display: 'flex', justifyContent: 'space-between' }}>
         <Button onClick={handleClose} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>Cancel</Button>
         <Button onClick={handleSave} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Save Preferences</Button>
       </DialogActions>

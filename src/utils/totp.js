@@ -1,14 +1,20 @@
 /**
- * Lightweight TOTP Code Generator for 2FA & Google Auth / 2FAS Decoder
+ * Lightweight & Feature-Complete TOTP / 2FA Engine
+ * RFC 6238 & RFC 4226 Compliant with 2FAS & Bitwarden Interoperability
+ * Includes Clock Drift Synchronization Compensation (2FAS Feature)
  */
 export class TOTP {
+  static STEAM_ALPHABET = '23456789BCDFGHJKMNPQRTVWXY';
+
   static base32toHex(base32) {
     const base32chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
     let bits = '';
     let hex = '';
 
-    for (let i = 0; i < base32.length; i++) {
-      const val = base32chars.indexOf(base32.toUpperCase().charAt(i));
+    const clean = (base32 || '').toUpperCase().replace(/[\s=-]/g, '');
+
+    for (let i = 0; i < clean.length; i++) {
+      const val = base32chars.indexOf(clean.charAt(i));
       if (val === -1) continue;
       bits += val.toString(2).padStart(5, '0');
     }
@@ -34,25 +40,85 @@ export class TOTP {
     return base32;
   }
 
-  static async generate(secret, window_time = 30) {
+  static getClockOffset() {
+    try {
+      return parseInt(localStorage.getItem('ciphervault_clock_drift') || '0', 10);
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  static async syncClockDrift() {
+    try {
+      const start = Date.now();
+      const res = await fetch('https://worldtimeapi.org/api/timezone/Etc/UTC', { cache: 'no-store' });
+      if (!res.ok) throw new Error('Time API unreachable');
+      const data = await res.json();
+      const end = Date.now();
+      const roundTrip = (end - start) / 1000;
+      const serverEpoch = Math.floor(new Date(data.utc_datetime).getTime() / 1000) + Math.floor(roundTrip / 2);
+      const localEpoch = Math.floor(Date.now() / 1000);
+      const driftSeconds = serverEpoch - localEpoch;
+      localStorage.setItem('ciphervault_clock_drift', driftSeconds.toString());
+      return driftSeconds;
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  static resetClockOffset() {
+    try {
+      localStorage.removeItem('ciphervault_clock_drift');
+    } catch (e) {}
+  }
+
+  /**
+   * Generates a TOTP code supporting 6/8 digits, SHA-1/256/512, custom period, or Steam Guard.
+   */
+  static async generate(secret, config = {}) {
     try {
       if (!secret) return '------';
-      const cleanSecret = secret.replace(/\s+/g, '').replace(/=+$/, '');
+
+      let cleanSecret = secret;
+      let window_time = typeof config === 'number' ? config : (config.period || config.window_time || 30);
+      let digits = config.digits || 6;
+      let algorithm = (config.algorithm || 'SHA-1').toUpperCase();
+      let isSteam = config.isSteam || false;
+      let epochOffset = config.epochOffset || 0;
+
+      if (typeof secret === 'string' && secret.startsWith('otpauth://')) {
+        const parsed = this.parseOtpAuthUrl(secret);
+        if (parsed.secret) cleanSecret = parsed.secret;
+        if (parsed.period) window_time = parsed.period;
+        if (parsed.digits) digits = parsed.digits;
+        if (parsed.algorithm) algorithm = parsed.algorithm;
+        if (parsed.isSteam) isSteam = true;
+      }
+
+      if (typeof secret === 'string' && secret.toLowerCase().includes('steam')) {
+        isSteam = true;
+      }
+
+      cleanSecret = cleanSecret.replace(/\s+/g, '').replace(/=+$/, '');
       const hexKey = this.base32toHex(cleanSecret);
       if (!hexKey) return 'Invalid 2FA';
 
-      const epoch = Math.floor(Date.now() / 1000);
+      const clockDrift = this.getClockOffset();
+      const epoch = Math.floor(Date.now() / 1000) + clockDrift + epochOffset;
       const time = Math.floor(epoch / window_time);
-      
       const timeHex = time.toString(16).padStart(16, '0');
       
       const keyBytes = new Uint8Array(hexKey.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
       const timeBytes = new Uint8Array(timeHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
 
+      let hashName = 'SHA-1';
+      if (algorithm.includes('256')) hashName = 'SHA-256';
+      else if (algorithm.includes('512')) hashName = 'SHA-512';
+
       const cryptoKey = await crypto.subtle.importKey(
         'raw',
         keyBytes,
-        { name: 'HMAC', hash: { name: 'SHA-1' } },
+        { name: 'HMAC', hash: { name: hashName } },
         false,
         ['sign']
       );
@@ -67,16 +133,70 @@ export class TOTP {
         ((hmacResult[offset + 2] & 0xff) << 8) |
         (hmacResult[offset + 3] & 0xff);
 
-      const otp = binary % 1000000;
-      return otp.toString().padStart(6, '0');
+      if (isSteam) {
+        let fullCode = binary;
+        let steamCode = '';
+        for (let i = 0; i < 5; i++) {
+          steamCode += this.STEAM_ALPHABET[fullCode % this.STEAM_ALPHABET.length];
+          fullCode = Math.floor(fullCode / this.STEAM_ALPHABET.length);
+        }
+        return steamCode;
+      }
+
+      const modulus = Math.pow(10, digits);
+      const otp = binary % modulus;
+      return otp.toString().padStart(digits, '0');
     } catch (err) {
       return 'Error';
     }
   }
 
   static getTimeRemaining(window_time = 30) {
-    const epoch = Math.floor(Date.now() / 1000);
+    const clockDrift = this.getClockOffset();
+    const epoch = Math.floor(Date.now() / 1000) + clockDrift;
     return window_time - (epoch % window_time);
+  }
+
+  static parseOtpAuthUrl(urlStr) {
+    try {
+      const url = new URL(urlStr);
+      if (url.protocol !== 'otpauth:') return { secret: urlStr };
+
+      const type = url.host; // 'totp' or 'hotp'
+      const label = decodeURIComponent(url.pathname.replace(/^\//, ''));
+      let issuer = url.searchParams.get('issuer') || '';
+      let account = label;
+
+      if (label.includes(':')) {
+        const parts = label.split(':');
+        if (!issuer) issuer = parts[0];
+        account = parts.slice(1).join(':').trim();
+      }
+
+      return {
+        type,
+        secret: url.searchParams.get('secret') || '',
+        issuer: issuer.trim(),
+        account: account.trim(),
+        algorithm: url.searchParams.get('algorithm') || 'SHA-1',
+        digits: parseInt(url.searchParams.get('digits') || '6', 10),
+        period: parseInt(url.searchParams.get('period') || '30', 10),
+        isSteam: (issuer || label).toLowerCase().includes('steam')
+      };
+    } catch (e) {
+      return { secret: urlStr };
+    }
+  }
+
+  static buildOtpAuthUrl({ issuer = '', name = '', secret = '', period = 30, digits = 6, algorithm = 'SHA1' }) {
+    const cleanSecret = secret.replace(/\s+/g, '').toUpperCase();
+    const label = issuer ? `${encodeURIComponent(issuer)}:${encodeURIComponent(name || issuer)}` : encodeURIComponent(name || 'CipherVault');
+    let url = `otpauth://totp/${label}?secret=${cleanSecret}`;
+    if (issuer) url += `&issuer=${encodeURIComponent(issuer)}`;
+    if (period && period !== 30) url += `&period=${period}`;
+    if (digits && digits !== 6) url += `&digits=${digits}`;
+    if (algorithm && algorithm !== 'SHA1') url += `&algorithm=${algorithm}`;
+    return url;
   }
 
   static parseGoogleMigrationUrl(urlStr) {

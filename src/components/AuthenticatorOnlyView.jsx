@@ -18,7 +18,7 @@ export default function AuthenticatorOnlyView({ onBackToLogin, settings }) {
     if (saved) {
       try {
         setAuthItems(JSON.parse(saved));
-      } catch (e) {}
+      } catch (e) { }
     } else {
       // Default sample 2FA if empty
       const initial = [
@@ -33,6 +33,21 @@ export default function AuthenticatorOnlyView({ onBackToLogin, settings }) {
   const saveAuthItems = (updated) => {
     setAuthItems(updated);
     localStorage.setItem('ciphervault_standalone_2fa', JSON.stringify(updated));
+  };
+
+  const handleSecretChange = (e) => {
+    const val = e.target.value.trim();
+    if (val.startsWith('otpauth://')) {
+      const parsed = TOTP.parseOtpAuthUrl(val);
+      if (parsed.secret) {
+        setNewSecret(parsed.secret);
+        if (!newName && (parsed.issuer || parsed.account)) {
+          setNewName(parsed.issuer ? `${parsed.issuer} (${parsed.account})` : parsed.account);
+        }
+        return;
+      }
+    }
+    setNewSecret(val);
   };
 
   const handleAddItem = (e) => {
@@ -98,12 +113,12 @@ export default function AuthenticatorOnlyView({ onBackToLogin, settings }) {
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
           <TextField
-            label="TOTP Secret Key (Base32)"
+            label="TOTP Secret Key or otpauth:// link"
             required
             fullWidth
             value={newSecret}
-            onChange={(e) => setNewSecret(e.target.value)}
-            placeholder="JBSWY3DPEHPK3PXP"
+            onChange={handleSecretChange}
+            placeholder="JBSWY3DPEHPK3PXP or otpauth://totp/..."
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>

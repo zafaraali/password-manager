@@ -9,6 +9,14 @@ export default function SetupView({ onSetupSuccess, profileName }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [generatedRecoveryCode, setGeneratedRecoveryCode] = useState('');
+  const [derivedVaultKey, setDerivedVaultKey] = useState(null);
+
+  // Clean up any historical insecure temp password in localStorage
+  useState(() => {
+    try {
+      localStorage.removeItem('ciphervault_temp_pw');
+    } catch (e) {}
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -41,9 +49,9 @@ export default function SetupView({ onSetupSuccess, profileName }) {
       localStorage.setItem(`ciphervault_salt${pfx}`, newSalt);
       localStorage.setItem(`ciphervault_vault${pfx}`, JSON.stringify(encrypted));
       localStorage.setItem(`ciphervault_recovery${pfx}`, recoveryCode);
-      localStorage.setItem('ciphervault_temp_pw', password);
       if (hint) localStorage.setItem(`ciphervault_hint${pfx}`, hint);
 
+      setDerivedVaultKey(derivedKey);
       setGeneratedRecoveryCode(recoveryCode);
     } catch (err) {
       setError('Setup failed: ' + err.message);
@@ -73,7 +81,7 @@ export default function SetupView({ onSetupSuccess, profileName }) {
           onClick={() => {
             navigator.clipboard.writeText(generatedRecoveryCode);
             alert('Recovery code copied to clipboard!');
-            onSetupSuccess();
+            onSetupSuccess(derivedVaultKey, [], []);
           }}
           sx={{ py: 1.5, fontWeight: 600, color: '#fff' }}
         >

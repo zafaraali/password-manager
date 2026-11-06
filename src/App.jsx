@@ -216,6 +216,18 @@ export default function App() {
     };
   }, [view, settings.autoLockMinutes]);
 
+  // Global hotkeys (Ctrl+L to lock vault)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l' && view === 'vault') {
+        e.preventDefault();
+        handleLockVault();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [view]);
+
   const pfx = currentProfile === 'Default' ? '' : `_${currentProfile}`;
 
   const saveVaultToLocalStorage = async (updatedItems, updatedTrash, activeKey) => {
@@ -262,6 +274,20 @@ export default function App() {
     const updatedTrash = trashItems.filter(item => item.id !== id);
     await saveVaultToLocalStorage(vaultItems, updatedTrash);
     setSuccessMsg('Item permanently deleted.');
+  };
+
+  const handleImportItems = async (itemsToImport, sourceLabel = 'imported items') => {
+    try {
+      if (!itemsToImport || itemsToImport.length === 0) {
+        alert('No valid items found to import.');
+        return;
+      }
+      const updated = [...vaultItems, ...itemsToImport];
+      await saveVaultToLocalStorage(updated, trashItems);
+      setSuccessMsg(`Successfully imported ${itemsToImport.length} ${sourceLabel}!`);
+    } catch (err) {
+      alert('Import failed: ' + err.message);
+    }
   };
 
   const handleImportTotpJson = async (data) => {
@@ -361,25 +387,22 @@ export default function App() {
           )}
 
           {view === 'setup' && (
-            <SetupView profileName={currentProfile} onSetupSuccess={() => {
-              const savedSalt = localStorage.getItem(`ciphervault_salt${pfx}`);
-              const savedCipher = localStorage.getItem(`ciphervault_vault${pfx}`);
-              CryptoEngine.deriveMasterKey(localStorage.getItem('ciphervault_temp_pw') || '', savedSalt).then(async k => {
-                const dec = await CryptoEngine.decryptPayload(k, JSON.parse(savedCipher));
-                const parsed = JSON.parse(dec);
-                setKey(k);
-                setVaultItems(parsed.items || []);
-                setTrashItems(parsed.trash || []);
+            <SetupView 
+              profileName={currentProfile} 
+              onSetupSuccess={(derivedKey, items = [], trash = []) => {
+                setKey(derivedKey);
+                setVaultItems(items);
+                setTrashItems(trash);
                 setView('vault');
-              }).catch(() => {
-                setView('unlock');
-              });
-            }} />
+                setSuccessMsg('Vault created and unlocked successfully!');
+              }} 
+            />
           )}
 
           {view === 'unlock' && (
             <UnlockView 
               profileName={currentProfile}
+              profiles={profiles}
               onUnlockSuccess={(derivedKey, items, trash) => {
                 setKey(derivedKey);
                 setVaultItems(items);
@@ -413,6 +436,7 @@ export default function App() {
               onDeleteProfile={handleDeleteProfile}
               onImportTotpJson={handleImportTotpJson}
               onImportVaultJson={handleImportVaultJson}
+              onImportItems={handleImportItems}
               activeKey={key}
               settings={settings}
             />
@@ -429,6 +453,7 @@ export default function App() {
           open={openExport}
           onClose={() => setOpenExport(false)}
           profileName={currentProfile}
+          vaultItems={vaultItems}
         />
 
         <TrashModal
@@ -457,6 +482,7 @@ export default function App() {
           onSaveSettings={handleSaveSettings}
           currentProfile={currentProfile}
           onDeleteProfile={handleDeleteProfile}
+          activeKey={key}
         />
       </Box>
     </ThemeProvider>

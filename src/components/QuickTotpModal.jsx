@@ -1,12 +1,100 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, Paper, TextField } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, Paper, TextField, InputAdornment } from '@mui/material';
+import SearchIcon from '@mui/icons-material/Search';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { TOTP } from '../utils/totp';
+import { CryptoEngine } from '../utils/crypto';
 
-export default function QuickTotpModal({ open, onClose, profiles }) {
+function TotpAccountCard({ account, tick, onCopy }) {
+  const [code, setCode] = useState('------');
+  const [timeLeft, setTimeLeft] = useState(30);
+
+  useEffect(() => {
+    let isMounted = true;
+    TOTP.generate(account.totpSecret).then((c) => {
+      if (isMounted) {
+        setCode(c);
+        setTimeLeft(TOTP.getTimeRemaining());
+      }
+    });
+    return () => { isMounted = false; };
+  }, [account.totpSecret, tick]);
+
+  const ringColor = timeLeft <= 5 ? '#ef4444' : timeLeft <= 10 ? '#f59e0b' : '#10b981';
+
+  return (
+    <Paper 
+      elevation={0}
+      sx={{ 
+        p: 2, 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        border: 1, 
+        borderColor: 'divider',
+        borderRadius: 3,
+        bgcolor: 'background.paper',
+        '&:hover': { borderColor: 'primary.main', bgcolor: 'action.hover' }
+      }}
+    >
+      <Box sx={{ flex: 1, minWidth: 0, mr: 2 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {account.name}
+        </Typography>
+        {account.username && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            {account.username}
+          </Typography>
+        )}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Typography 
+            variant="h6" 
+            sx={{ 
+              fontFamily: 'monospace', 
+              fontWeight: 800, 
+              letterSpacing: 2, 
+              color: 'primary.main',
+              fontSize: '1.2rem'
+            }}
+          >
+            {code}
+          </Typography>
+          <Typography 
+            variant="caption" 
+            sx={{ 
+              fontFamily: 'monospace', 
+              fontWeight: 700, 
+              px: 0.8, 
+              py: 0.2, 
+              borderRadius: 1, 
+              bgcolor: `${ringColor}15`, 
+              color: ringColor 
+            }}
+          >
+            {timeLeft}s
+          </Typography>
+        </Box>
+      </Box>
+      <Button 
+        size="small" 
+        variant="contained" 
+        startIcon={<ContentCopyIcon fontSize="small" />}
+        onClick={() => onCopy(code, account.name)}
+        sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, color: '#fff' }}
+      >
+        Copy
+      </Button>
+    </Paper>
+  );
+}
+
+export default function QuickTotpModal({ open, onClose, profiles = ['Default'] }) {
   const [selectedProfile, setSelectedProfile] = useState(profiles[0] || 'Default');
   const [totpAccounts, setTotpAccounts] = useState([]);
+  const [passwordPrompt, setPasswordPrompt] = useState('');
   const [error, setError] = useState('');
   const [copiedMsg, setCopiedMsg] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -17,11 +105,11 @@ export default function QuickTotpModal({ open, onClose, profiles }) {
   useEffect(() => {
     if (open) {
       setTotpAccounts([]);
-      setError('Enter master password to quickly view 2FA codes for this profile without fully logging in.');
+      setPasswordPrompt('');
+      setError('');
+      setSearchQuery('');
     }
   }, [open, selectedProfile]);
-
-  const [passwordPrompt, setPasswordPrompt] = useState('');
 
   const handleUnlockQuick = async (e) => {
     e.preventDefault();
@@ -35,7 +123,6 @@ export default function QuickTotpModal({ open, onClose, profiles }) {
         return;
       }
 
-      const { CryptoEngine } = await import('../utils/crypto');
       const derivedKey = await CryptoEngine.deriveMasterKey(passwordPrompt, savedSalt);
       const encryptedObj = JSON.parse(savedCipherStr);
       const decryptedJson = await CryptoEngine.decryptPayload(derivedKey, encryptedObj);
@@ -43,32 +130,54 @@ export default function QuickTotpModal({ open, onClose, profiles }) {
       const items = Array.isArray(parsedData) ? parsedData : (parsedData.items || []);
 
       const secrets = items.filter(i => i.totpSecret);
-      setTotpAccounts(secrets);
-      setError('');
-      setPasswordPrompt('');
+      if (secrets.length === 0) {
+        setError('No items with 2FA TOTP secrets found in this vault.');
+      } else {
+        setTotpAccounts(secrets);
+        setError('');
+        setPasswordPrompt('');
+      }
     } catch (err) {
       setError('Incorrect master password.');
     }
   };
 
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ fontWeight: 600 }}>⚡ Quick 2FA View (Standalone)</DialogTitle>
-      <DialogContent dividers>
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            Generate 2FA codes instantly without navigating the full vault dashboard.
-          </Typography>
+  const handleCopy = (code, name) => {
+    navigator.clipboard.writeText(code);
+    setCopiedMsg(`Copied 2FA code for [${name}]!`);
+    setTimeout(() => setCopiedMsg(''), 3000);
+  };
 
+  const filtered = totpAccounts.filter(acc => 
+    acc.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    (acc.username && acc.username.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
+      <DialogTitle sx={{ fontWeight: 800, fontSize: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>⚡ Quick 2FA Authenticator</span>
+        {copiedMsg && (
+          <Typography variant="caption" sx={{ color: 'secondary.main', fontWeight: 700 }}>
+            {copiedMsg}
+          </Typography>
+        )}
+      </DialogTitle>
+      <DialogContent dividers>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
             <TextField
               select
               SelectProps={{ native: true }}
               size="small"
-              label="Profile"
+              label="Select Profile"
               value={selectedProfile}
-              onChange={(e) => setSelectedProfile(e.target.value)}
+              onChange={(e) => {
+                setSelectedProfile(e.target.value);
+                setTotpAccounts([]);
+              }}
               fullWidth
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
             >
               {profiles.map(p => (
                 <option key={p} value={p}>{p}</option>
@@ -77,57 +186,63 @@ export default function QuickTotpModal({ open, onClose, profiles }) {
           </Box>
 
           {totpAccounts.length === 0 ? (
-            <Box component="form" onSubmit={handleUnlockQuick} sx={{ p: 3, border: 1, borderColor: 'divider', borderRadius: 2, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Typography variant="body2">Enter master password for [{selectedProfile}] to load 2FA codes:</Typography>
-              {error && <Typography variant="caption" color="error">{error}</Typography>}
+            <Paper 
+              elevation={0}
+              component="form" 
+              onSubmit={handleUnlockQuick} 
+              sx={{ p: 3, border: 1, borderColor: 'divider', borderRadius: 3, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 2, bgcolor: 'background.paper' }}
+            >
+              <Typography variant="body2" color="text.secondary">
+                Enter master password for <strong>[{selectedProfile}]</strong> to quickly load all 2FA tokens without opening the full vault:
+              </Typography>
+              {error && <Typography variant="caption" color="error" sx={{ fontWeight: 600 }}>{error}</Typography>}
               <TextField
                 type="password"
                 size="small"
                 label="Master Password"
+                required
+                autoFocus
                 value={passwordPrompt}
                 onChange={(e) => setPasswordPrompt(e.target.value)}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
-              <Button type="submit" variant="contained">Load 2FA Codes</Button>
-            </Box>
+              <Button type="submit" variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff' }}>
+                Load 2FA Codes
+              </Button>
+            </Paper>
           ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-              {copiedMsg && <Typography variant="caption" color="success.main" sx={{ textAlign: 'center' }}>{copiedMsg}</Typography>}
-              {totpAccounts.map(acc => {
-                const [code, setCode] = useState('------');
-                useEffect(() => {
-                  TOTP.generate(acc.totpSecret).then(setCode);
-                }, [tick]);
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <TextField
+                size="small"
+                placeholder="Search 2FA accounts..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon fontSize="small" color="action" />
+                    </InputAdornment>
+                  ),
+                }}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+              />
 
-                return (
-                  <Paper key={acc.id} sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: 1, borderColor: 'divider' }}>
-                    <Box>
-                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{acc.name}</Typography>
-                      <Typography variant="body1" sx={{ fontFamily: 'monospace', fontWeight: 700, letterSpacing: 2, color: 'primary.main' }}>
-                        {code}
-                      </Typography>
-                    </Box>
-                    <Button 
-                      size="small" 
-                      variant="outlined" 
-                      onClick={() => {
-                        TOTP.generate(acc.totpSecret).then(c => {
-                          navigator.clipboard.writeText(c);
-                          setCopiedMsg(`Copied 2FA code for ${acc.name}!`);
-                          setTimeout(() => setCopiedMsg(''), 3000);
-                        });
-                      }}
-                    >
-                      Copy Code
-                    </Button>
-                  </Paper>
-                );
-              })}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, maxHeight: '400px', overflowY: 'auto' }}>
+                {filtered.map(acc => (
+                  <TotpAccountCard key={acc.id} account={acc} tick={tick} onCopy={handleCopy} />
+                ))}
+                {filtered.length === 0 && (
+                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 3 }}>
+                    No matching 2FA accounts.
+                  </Typography>
+                )}
+              </Box>
             </Box>
           )}
         </Box>
       </DialogContent>
       <DialogActions sx={{ p: 2 }}>
-        <Button onClick={onClose} variant="contained">Close</Button>
+        <Button onClick={onClose} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2 }}>Close</Button>
       </DialogActions>
     </Dialog>
   );
