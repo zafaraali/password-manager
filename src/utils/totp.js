@@ -62,7 +62,7 @@ export class TOTP {
       localStorage.setItem('ciphervault_clock_drift', driftSeconds.toString());
       return driftSeconds;
     } catch (err) {
-      return 0;
+      return null;
     }
   }
 

@@ -18,6 +18,7 @@ import StarBorderIcon from '@mui/icons-material/StarBorder';
 import LaunchIcon from '@mui/icons-material/Launch';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import SearchIcon from '@mui/icons-material/Search';
+import { copyToClipboard } from '../utils/clipboard';
 
 export default function VaultDashboard({ 
   vaultItems = [], trashItems = [], onSaveItem, onDeleteItem, onRestoreItem, onDeletePermanent,
@@ -33,6 +34,7 @@ export default function VaultDashboard({
   const [showCustomFieldMap, setShowCustomFieldMap] = useState({});
   const [historyItem, setHistoryItem] = useState(null);
   const [copiedMsg, setCopiedMsg] = useState('');
+  const [clipboardRemaining, setClipboardRemaining] = useState(0);
 
   // Live Camera QR Scanner state
   const [cameraActive, setCameraActive] = useState(false);
@@ -40,6 +42,9 @@ export default function VaultDashboard({
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const searchInputRef = useRef(null);
+  const clipboardTimerRef = useRef(null);
+
+  useEffect(() => () => clearInterval(clipboardTimerRef.current), []);
 
   // Global search shortcut (Ctrl+K or /)
   useEffect(() => {
@@ -136,6 +141,36 @@ export default function VaultDashboard({
       setCopiedMsg(`Copied ${label}!`);
       setTimeout(() => setCopiedMsg(''), 2500);
     } catch (err) {}
+  };
+
+  const copySecret = async (text, label, clearAfter = false) => {
+    if (!text) { setCopiedMsg(`${label} is empty.`); return; }
+    try {
+      const copied = await copyToClipboard(text);
+      if (!copied) throw new Error('Clipboard unavailable');
+      const timeoutSec = settings?.clipboardTimeout || 30;
+      if (clearAfter) {
+        clearInterval(clipboardTimerRef.current);
+        setClipboardRemaining(timeoutSec);
+        setCopiedMsg(`${label} copied · clears in ${timeoutSec}s`);
+        clipboardTimerRef.current = setInterval(() => setClipboardRemaining(value => {
+          if (value <= 1) {
+            clearInterval(clipboardTimerRef.current);
+            copyToClipboard('');
+            setCopiedMsg('Clipboard cleared');
+            return 0;
+          }
+          setCopiedMsg(`${label} copied · clears in ${value - 1}s`);
+          return value - 1;
+        }), 1000);
+      }
+      else setTimeout(() => setCopiedMsg(''), 2200);
+    } catch (err) { setCopiedMsg(`Could not copy ${label.toLowerCase()}.`); }
+  };
+
+  const handleCopyTotp = async (item) => {
+    const code = await TOTP.generate(item.totpSecret);
+    await copySecret(code, '2FA code');
   };
 
   const handleDownloadAttachment = async (att) => {
@@ -536,7 +571,15 @@ export default function VaultDashboard({
               </Box>
             )}
 
-            {item.category !== 'Crypto' && item.category !== 'SSH' && item.category !== 'Wifi' && (
+            {item.category === 'Passkeys' && item.templateData && (
+              <Box sx={{ mb: 2, p: 2, bgcolor: 'rgba(99, 102, 241, 0.08)', borderRadius: 2, border: 1, borderColor: 'primary.main' }}>
+                <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700, display: 'block', mb: .75 }}>🔑 Passkey / WebAuthn credential</Typography>
+                <Typography variant="body2">{item.templateData.rpId || 'No relying party ID'}</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .5 }}>Algorithm: {item.templateData.algorithm || 'Not specified'}</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>Credential: {item.templateData.credentialId || 'Not registered'}</Typography>
+              </Box>
+            )}
+            {item.category !== 'Crypto' && item.category !== 'SSH' && item.category !== 'Wifi' && item.category !== 'Passkeys' && (
               <>
                 <Typography variant="body2" sx={{ fontFamily: 'monospace', color: 'text.secondary', mb: 1, fontSize: '0.85rem' }}>
                   {item.username || 'No username'}
@@ -620,7 +663,7 @@ export default function VaultDashboard({
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button 
+                <Button
                   size="small" 
                   variant="text" 
                   startIcon={isRevealed ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />} 
@@ -629,15 +672,11 @@ export default function VaultDashboard({
                 >
                   {isRevealed ? 'Hide' : 'Reveal'}
                 </Button>
-                <Button 
-                  size="small" 
-                  variant="contained" 
-                  startIcon={<ContentCopyIcon fontSize="small" />} 
-                  onClick={() => handleCopyValue(item)} 
-                  sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, color: '#fff', bgcolor: 'primary.main', '&:hover': { bgcolor: 'primary.dark' } }}
-                >
-                  Copy
-                </Button>
+                <Box sx={{ display: 'flex', gap: .5, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <Tooltip title="Copy username"><Button size="small" variant="outlined" startIcon={<ContentCopyIcon fontSize="small" />} onClick={() => copySecret(item.username, 'Username')} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}>User</Button></Tooltip>
+                  <Tooltip title={`Copy password · clears in ${settings?.clipboardTimeout || 30}s`}><Button size="small" variant="contained" startIcon={<ContentCopyIcon fontSize="small" />} onClick={() => copySecret(item.password, 'Password', true)} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, color: '#fff' }}>Pass</Button></Tooltip>
+                  {item.totpSecret && <Tooltip title="Copy current 2FA code"><Button size="small" variant="outlined" color="secondary" startIcon={<ContentCopyIcon fontSize="small" />} onClick={() => handleCopyTotp(item)} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}>2FA</Button></Tooltip>}
+                </Box>
               </Box>
               <Box sx={{ display: 'flex', gap: 0.5 }}>
                 <IconButton size="small" onClick={() => handleOpenEdit(item)} title="Edit" sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>

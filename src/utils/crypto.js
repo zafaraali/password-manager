@@ -167,7 +167,7 @@ export class CryptoEngine {
       const suffix = hash.slice(5);
 
       const res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`);
-      if (!res.ok) return 0;
+      if (!res.ok) return null;
       const text = await res.text();
 
       const lines = text.split("\n");
@@ -177,7 +177,7 @@ export class CryptoEngine {
           return parseInt(count, 10) || 0;
         }
       }
-      return 0;
+      return null;
     } catch (e) {
       // In case of network interruption, gracefully return 0
       return 0;

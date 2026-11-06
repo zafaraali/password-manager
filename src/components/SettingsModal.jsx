@@ -18,6 +18,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
   const [confirmPin, setConfirmPin] = useState('');
   const [pinMsg, setPinMsg] = useState('');
   const [pinError, setPinError] = useState('');
+  const [clockSync, setClockSync] = useState({ status: '', loading: false });
 
   useEffect(() => {
     if (open) {
@@ -29,6 +30,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
       setConfirmPin('');
       setPinMsg('');
       setPinError('');
+      setClockSync({ status: '', loading: false });
 
       const pfx = currentProfile === 'Default' ? '' : `_${currentProfile}`;
       const isPin = localStorage.getItem(`ciphervault_pin_enabled${pfx}`) === 'true';
@@ -44,6 +46,12 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
       }
       return updated;
     });
+  };
+
+  const handleClockSync = async () => {
+    setClockSync({ status: 'Checking UTC time…', loading: true });
+    const offset = await TOTP.syncClockDrift();
+    setClockSync({ status: offset === null ? 'Unable to reach UTC time service. Try again when online.' : `System clock is ${Math.abs(offset) <= 1 ? 'accurate' : 'adjusted'} (offset: ${offset}s)`, loading: false });
   };
 
   const handleColorSelect = (colorValue) => {
@@ -195,6 +203,15 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
 
           <Divider />
 
+          <Box>
+            <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>🕐 2FA Clock Sync</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Compare your device with UTC and compensate TOTP generation for drift.</Typography>
+            <Button variant="outlined" onClick={handleClockSync} disabled={clockSync.loading} sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2 }}>{clockSync.loading ? 'Checking…' : 'Sync Clock with Atomic UTC'}</Button>
+            {clockSync.status && <Alert severity={clockSync.status.includes('accurate') ? 'success' : 'info'} sx={{ mt: 1.5 }}>{clockSync.status}</Alert>}
+          </Box>
+
+          <Divider />
+
           {/* Quick PIN Unlock Configuration (Bitwarden & 2FAS Feature) */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 700 }}>
@@ -326,6 +343,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
               onChange={(e) => handleChange('autoLockMinutes', parseInt(e.target.value) || 10)}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
             />
+            <FormControlLabel control={<Switch checked={!!localSettings.lockOnBlur} onChange={(e) => handleChange('lockOnBlur', e.target.checked)} />} label="Lock vault immediately when switching tabs or minimizing" />
           </Box>
 
           <Divider />

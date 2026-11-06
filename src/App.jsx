@@ -24,7 +24,8 @@ export default function App() {
     genNumbers: true,
     genSymbols: true,
     clipboardTimeout: 30,
-    autoLockMinutes: 10
+    autoLockMinutes: 10,
+    lockOnBlur: false
   });
 
   const theme = useMemo(() => createTheme({
@@ -45,6 +46,11 @@ export default function App() {
       fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
       h5: { fontWeight: 700, letterSpacing: '-0.025em' },
       h6: { fontWeight: 600, letterSpacing: '-0.015em' },
+    },
+    components: {
+      MuiCssBaseline: { styleOverrides: { body: { backgroundImage: mode === 'dark' ? 'radial-gradient(circle at 15% 0%, rgba(99,102,241,.12), transparent 34rem)' : 'radial-gradient(circle at 15% 0%, rgba(99,102,241,.08), transparent 34rem)', backgroundAttachment: 'fixed' }, '*:focus-visible': { outline: `3px solid ${settings.accentColor || '#6366f1'}`, outlineOffset: 2 } } },
+      MuiButton: { styleOverrides: { root: { textTransform: 'none', fontWeight: 650 } } },
+      MuiPaper: { styleOverrides: { root: { backgroundImage: 'none' } } },
     },
   }), [mode, settings.accentColor]);
 
@@ -216,6 +222,20 @@ export default function App() {
     };
   }, [view, settings.autoLockMinutes]);
 
+  useEffect(() => {
+    if (!settings.lockOnBlur || view !== 'vault') return undefined;
+    const handleBlur = () => handleLockVault();
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') handleBlur();
+    };
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [view, settings.lockOnBlur]);
+
   // Global hotkeys (Ctrl+L to lock vault)
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -255,7 +275,7 @@ export default function App() {
     const itemToDelete = vaultItems.find(i => i.id === id);
     if (!itemToDelete) return;
     const updatedVault = vaultItems.filter(item => item.id !== id);
-    const updatedTrash = [...trashItems, itemToDelete];
+    const updatedTrash = [...trashItems, { ...itemToDelete, deletedAt: new Date().toISOString(), originalCreatedAt: itemToDelete.createdAt || itemToDelete.passwordUpdatedAt || null }];
     await saveVaultToLocalStorage(updatedVault, updatedTrash);
     setSuccessMsg('Item moved to trash.');
   };
@@ -274,6 +294,11 @@ export default function App() {
     const updatedTrash = trashItems.filter(item => item.id !== id);
     await saveVaultToLocalStorage(vaultItems, updatedTrash);
     setSuccessMsg('Item permanently deleted.');
+  };
+
+  const handleEmptyTrash = async () => {
+    await saveVaultToLocalStorage(vaultItems, []);
+    setSuccessMsg('Trash emptied permanently.');
   };
 
   const handleImportItems = async (itemsToImport, sourceLabel = 'imported items') => {
@@ -462,6 +487,7 @@ export default function App() {
           trashItems={trashItems}
           onRestore={handleRestoreItem}
           onDeletePermanent={handleDeletePermanent}
+          onEmptyTrash={handleEmptyTrash}
         />
 
         <ProfileManagerModal

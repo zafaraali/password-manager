@@ -73,6 +73,8 @@ export default function SecurityAuditorModal({ open, onClose, vaultItems = [] })
       isBreached = true;
       breachCount = pwnedMap[pwd];
       issues.push(`EXPOSED IN BREACH (${breachCount.toLocaleString()} times)`);
+    } else if (pwnedScanned && pwd && pwnedMap[pwd] === null) {
+      issues.push('BREACH CHECK UNAVAILABLE');
     }
 
     // Check strength

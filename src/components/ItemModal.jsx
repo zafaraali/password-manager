@@ -52,6 +52,9 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
   // Real-time inline HIBP breach check state
   const [inlinePwnedCount, setInlinePwnedCount] = useState(null);
   const [checkingInlinePwned, setCheckingInlinePwned] = useState(false);
+  const [passkeyStatus, setPasskeyStatus] = useState('');
+
+  const toBase64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 
   useEffect(() => {
     if (editingItem) {
@@ -88,7 +91,37 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
     setShowKey(false);
     setShowPassphrase(false);
     setInlinePwnedCount(null);
+    setPasskeyStatus('');
   }, [editingItem, open]);
+
+  const registerPasskey = async () => {
+    if (!window.PublicKeyCredential) {
+      setPasskeyStatus('This browser does not support WebAuthn.');
+      return;
+    }
+    try {
+      let websiteHost = window.location.hostname;
+      if (formWebsite) {
+        try { websiteHost = new URL(formWebsite.includes('://') ? formWebsite : `https://${formWebsite}`).hostname; } catch (e) {}
+      }
+      const rpId = templateData.rpId || websiteHost;
+      const credential = await navigator.credentials.create({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rp: { name: 'CipherVault', id: rpId },
+        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: formUsername || 'vault-user', displayName: formUsername || formName },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }, { type: 'public-key', alg: -8 }],
+        authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
+        timeout: 60000,
+        attestation: 'none'
+      }});
+      if (!credential) throw new Error('No credential was returned.');
+      const response = credential.response;
+      setTemplateData(prev => ({ ...prev, rpId, credentialId: toBase64(credential.rawId), publicKey: toBase64(response.attestationObject || response.clientDataJSON), algorithm: 'WebAuthn (ES256 / RS256 / Ed25519)' }));
+      setPasskeyStatus('Passkey registered in this browser. Save the item to keep its metadata.');
+    } catch (error) {
+      setPasskeyStatus(error.name === 'NotAllowedError' ? 'Passkey registration was cancelled.' : `Passkey registration failed: ${error.message}`);
+    }
+  };
 
   // Real-time inline breach check with debouncing
   useEffect(() => {
@@ -247,6 +280,14 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!formName) return;
+    if (checkingInlinePwned) {
+      alert('Please wait for the password breach check to finish before saving.');
+      return;
+    }
+    if (inlinePwnedCount > 0) {
+      alert('This password appears in public data breaches. Please choose a different password before saving.');
+      return;
+    }
 
     const existingHistory = editingItem?.passwordHistory || [];
     let updatedHistory = [...existingHistory];
@@ -275,7 +316,8 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
       attachment: formAttachment,
       templateData: templateData,
       passwordHistory: updatedHistory,
-      passwordUpdatedAt: passwordChanged || !editingItem ? new Date().toISOString() : (editingItem.passwordUpdatedAt || new Date().toISOString())
+      passwordUpdatedAt: passwordChanged || !editingItem ? new Date().toISOString() : (editingItem.passwordUpdatedAt || new Date().toISOString()),
+      createdAt: editingItem?.createdAt || new Date().toISOString()
     });
   };
 
@@ -420,6 +462,18 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 onChange={(e) => setTemplateData(prev => ({ ...prev, algorithm: e.target.value }))}
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
+              <TextField
+                label="Public Key (Base64 / COSE)"
+                fullWidth
+                multiline
+                minRows={2}
+                value={templateData.publicKey || ''}
+                onChange={(e) => setTemplateData(prev => ({ ...prev, publicKey: e.target.value }))}
+                placeholder="Base64-encoded credential public key"
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+              />
+              <Button variant="contained" onClick={registerPasskey} sx={{ alignSelf: 'flex-start', textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff' }}>Register passkey on this device</Button>
+              {passkeyStatus && <Typography variant="caption" color={passkeyStatus.includes('failed') || passkeyStatus.includes('cancelled') || passkeyStatus.includes('does not') ? 'error.main' : 'success.main'}>{passkeyStatus}</Typography>}
             </Box>
           )}
 
@@ -500,6 +554,11 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                         {inlinePwnedCount > 0 
                           ? `🚨 Warning: Found in ${inlinePwnedCount.toLocaleString()} data breaches! Choose another password.` 
                           : '✨ Zero known breaches (Checked against HaveIBeenPwned)'}
+                      </Typography>
+                    )}
+                    {!checkingInlinePwned && inlinePwnedCount === null && formPassword.length >= 6 && (
+                      <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: .8, fontWeight: 600 }}>
+                        Unable to verify breach status right now. Saving is allowed, but verify this password when online.
                       </Typography>
                     )}
                   </Box>
