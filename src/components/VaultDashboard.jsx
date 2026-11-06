@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Paper, Typography, Button, Box, Tabs, Tab, TextField, Grid, Chip, IconButton, Tooltip,
-  Dialog, DialogTitle, DialogContent, DialogActions, Alert, CircularProgress
+  Dialog, DialogTitle, DialogContent, DialogActions, Alert, CircularProgress, Menu, MenuItem, Divider,
+  Select, ToggleButton, ToggleButtonGroup
 } from '@mui/material';
 import ItemModal from './ItemModal';
 import PasswordHistoryModal from './PasswordHistoryModal';
@@ -18,6 +19,10 @@ import StarBorderIcon from '@mui/icons-material/StarBorder';
 import LaunchIcon from '@mui/icons-material/Launch';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import SearchIcon from '@mui/icons-material/Search';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import SortIcon from '@mui/icons-material/Sort';
+import ViewListIcon from '@mui/icons-material/ViewList';
+import GridViewIcon from '@mui/icons-material/GridView';
 import { copyToClipboard } from '../utils/clipboard';
 
 export default function VaultDashboard({ 
@@ -35,6 +40,9 @@ export default function VaultDashboard({
   const [historyItem, setHistoryItem] = useState(null);
   const [copiedMsg, setCopiedMsg] = useState('');
   const [clipboardRemaining, setClipboardRemaining] = useState(0);
+  const [sortBy, setSortBy] = useState('recent');
+  const [viewMode, setViewMode] = useState('grid');
+  const [importAnchor, setImportAnchor] = useState(null);
 
   // Live Camera QR Scanner state
   const [cameraActive, setCameraActive] = useState(false);
@@ -420,7 +428,7 @@ export default function VaultDashboard({
   const allTags = Array.from(new Set(vaultItems.flatMap(i => i.tags || [])));
 
   // Filtered items
-  const filteredItems = vaultItems.filter(item => {
+  const matchingItems = vaultItems.filter(item => {
     const matchesCategory = filterCategory === 'All' || item.category === filterCategory;
     const matchesTag = selectedTag === 'All' || (item.tags && item.tags.includes(selectedTag));
     const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -429,6 +437,12 @@ export default function VaultDashboard({
                           (item.notes && item.notes.toLowerCase().includes(searchQuery.toLowerCase())) ||
                           (item.tags && item.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase())));
     return matchesCategory && matchesTag && matchesSearch;
+  });
+
+  const filteredItems = [...matchingItems].sort((a, b) => {
+    if (sortBy === 'name') return (a.name || '').localeCompare(b.name || '');
+    if (sortBy === 'favorite') return Number(b.favorite) - Number(a.favorite);
+    return new Date(b.passwordUpdatedAt || b.createdAt || 0).getTime() - new Date(a.passwordUpdatedAt || a.createdAt || 0).getTime();
   });
 
   const pinnedItems = filteredItems.filter(i => i.favorite);
@@ -452,7 +466,7 @@ export default function VaultDashboard({
     const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : null;
 
     return (
-      <Grid item xs={12} sm={6} key={item.id}>
+      <Grid item xs={12} sm={viewMode === 'list' ? 12 : 6} key={item.id}>
         <Paper 
           elevation={0} 
           sx={{ 
@@ -517,6 +531,7 @@ export default function VaultDashboard({
                   onClick={() => handleToggleFavorite(item)}
                   color={item.favorite ? 'warning' : 'default'}
                   title={item.favorite ? 'Remove Favorite' : 'Mark as Favorite'}
+                  aria-label={item.favorite ? 'Remove from favorites' : 'Add to favorites'}
                 >
                   {item.favorite ? <StarIcon fontSize="small" /> : <StarBorderIcon fontSize="small" />}
                 </IconButton>
@@ -679,10 +694,10 @@ export default function VaultDashboard({
                 </Box>
               </Box>
               <Box sx={{ display: 'flex', gap: 0.5 }}>
-                <IconButton size="small" onClick={() => handleOpenEdit(item)} title="Edit" sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
+                <IconButton size="small" onClick={() => handleOpenEdit(item)} title="Edit" aria-label={`Edit ${item.name}`} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
                   <EditOutlinedIcon fontSize="small" />
                 </IconButton>
-                <IconButton size="small" color="error" onClick={() => onDeleteItem(item.id)} title="Delete" sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
+                <IconButton size="small" color="error" onClick={() => onDeleteItem(item.id)} title="Delete" aria-label={`Delete ${item.name}`} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
                   <DeleteOutlineIcon fontSize="small" />
                 </IconButton>
               </Box>
@@ -707,7 +722,9 @@ export default function VaultDashboard({
           <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.5 }}>Vault Dashboard [{currentProfile}]</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <span>🛡️ {vaultItems.length} secure item{vaultItems.length === 1 ? '' : 's'} stored locally.</span>
-            {copiedMsg && <Box component="span" sx={{ color: 'secondary.main', fontWeight: 600, ml: 1 }}>{copiedMsg}</Box>}
+            <Chip size="small" label={`${vaultItems.filter(item => item.favorite).length} favorites`} variant="outlined" />
+            <Chip size="small" label={`${vaultItems.filter(item => item.totpSecret).length} with 2FA`} variant="outlined" color="secondary" />
+            {copiedMsg && <Box component="span" sx={{ color: 'secondary.main', fontWeight: 650 }}>{copiedMsg}</Box>}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
@@ -737,16 +754,18 @@ export default function VaultDashboard({
           scrollButtons="auto"
           sx={{ '& .MuiTab-root': { textTransform: 'none', fontWeight: 600, fontSize: '0.9rem', minHeight: 44, borderRadius: 2, mr: 1 } }}
         >
-          <Tab label="All" value="All" />
-          <Tab label="Logins" value="Logins" />
-          <Tab label="Cards" value="Cards" />
-          <Tab label="Notes" value="Notes" />
-          <Tab label="API Keys" value="ApiKeys" />
-          <Tab label="Crypto" value="Crypto" />
-          <Tab label="SSH" value="SSH" />
-          <Tab label="Wifi" value="Wifi" />
+          <Tab label={`All (${vaultItems.length})`} value="All" />
+          <Tab label={`Logins (${vaultItems.filter(i => i.category === 'Logins').length})`} value="Logins" />
+          <Tab label={`Cards (${vaultItems.filter(i => i.category === 'Cards').length})`} value="Cards" />
+          <Tab label={`Notes (${vaultItems.filter(i => i.category === 'Notes').length})`} value="Notes" />
+          <Tab label={`API Keys (${vaultItems.filter(i => i.category === 'ApiKeys').length})`} value="ApiKeys" />
+          <Tab label={`Passkeys (${vaultItems.filter(i => i.category === 'Passkeys').length})`} value="Passkeys" />
+          <Tab label={`Crypto (${vaultItems.filter(i => i.category === 'Crypto').length})`} value="Crypto" />
+          <Tab label={`SSH (${vaultItems.filter(i => i.category === 'SSH').length})`} value="SSH" />
+          <Tab label={`Wifi (${vaultItems.filter(i => i.category === 'Wifi').length})`} value="Wifi" />
         </Tabs>
 
+        <Box sx={{ display: 'flex', gap: 1, width: { xs: '100%', sm: 'auto' }, alignItems: 'center' }}>
         <TextField
           inputRef={searchInputRef}
           size="small"
@@ -758,8 +777,18 @@ export default function VaultDashboard({
               <SearchIcon fontSize="small" color="action" sx={{ mr: 1 }} />
             ),
           }}
-          sx={{ width: { xs: '100%', sm: '280px' }, '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+          sx={{ flex: 1, minWidth: 0, width: { xs: 'auto', sm: '280px' }, '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
         />
+        <Select size="small" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort vault items" sx={{ minWidth: 112, borderRadius: 3 }}>
+          <MenuItem value="recent">Recent</MenuItem>
+          <MenuItem value="name">Name</MenuItem>
+          <MenuItem value="favorite">Favorites</MenuItem>
+        </Select>
+        <ToggleButtonGroup size="small" exclusive value={viewMode} onChange={(e, value) => value && setViewMode(value)} aria-label="Vault view">
+          <ToggleButton value="grid" aria-label="Grid view"><GridViewIcon fontSize="small" /></ToggleButton>
+          <ToggleButton value="list" aria-label="List view"><ViewListIcon fontSize="small" /></ToggleButton>
+        </ToggleButtonGroup>
+        </Box>
       </Box>
 
       {/* Tags Filter Chips (2FAS Grouping feature) */}
@@ -795,7 +824,7 @@ export default function VaultDashboard({
           <Typography variant="subtitle2" sx={{ fontWeight: 800, color: 'warning.main', display: 'flex', alignItems: 'center', gap: 1 }}>
             <StarIcon fontSize="small" /> Pinned Favorites ({pinnedItems.length})
           </Typography>
-          <Grid container spacing={3}>
+          <Grid container spacing={viewMode === 'list' ? 1.5 : 3}>
             {pinnedItems.map(item => renderItemCard(item, true))}
           </Grid>
         </Box>
@@ -808,18 +837,16 @@ export default function VaultDashboard({
             All Vault Items ({regularItems.length})
           </Typography>
         )}
-        <Grid container spacing={3}>
+        <Grid container spacing={viewMode === 'list' ? 1.5 : 3}>
           {filteredItems.length === 0 ? (
             <Grid item xs={12}>
               <Paper elevation={0} sx={{ p: 6, textAlign: 'center', borderRadius: 4, border: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
                 <Typography variant="h3" sx={{ mb: 2 }}>📭</Typography>
-                <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>No vault items found</Typography>
+                <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>{searchQuery || filterCategory !== 'All' || selectedTag !== 'All' ? 'No matching items' : 'Your vault is ready'}</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Add your credentials, import your Bitwarden or 2FAS backup, or adjust your search filter.
+                  {searchQuery || filterCategory !== 'All' || selectedTag !== 'All' ? 'Try a different search term or clear your filters.' : 'Add your first credential or import an existing encrypted backup to get started.'}
                 </Typography>
-                <Button variant="contained" onClick={handleOpenAdd} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, color: '#fff' }}>
-                  + Add Item Now
-                </Button>
+                {searchQuery || filterCategory !== 'All' || selectedTag !== 'All' ? <Button variant="outlined" onClick={() => { setSearchQuery(''); setFilterCategory('All'); setSelectedTag('All'); }} sx={{ borderRadius: 2 }}>Clear filters</Button> : <Button variant="contained" onClick={handleOpenAdd} sx={{ borderRadius: 2, color: '#fff' }}>Add your first item</Button>}
               </Paper>
             </Grid>
           ) : (

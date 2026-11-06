@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Box, 
   FormControl, InputLabel, Select, MenuItem, Typography, IconButton, InputAdornment, 
-  LinearProgress, Chip, ButtonGroup, CircularProgress 
+  LinearProgress, Chip, ButtonGroup, CircularProgress, Stepper, Step, StepLabel, Alert
 } from '@mui/material';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
@@ -53,6 +53,8 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
   const [inlinePwnedCount, setInlinePwnedCount] = useState(null);
   const [checkingInlinePwned, setCheckingInlinePwned] = useState(false);
   const [passkeyStatus, setPasskeyStatus] = useState('');
+  const [itemStep, setItemStep] = useState(0);
+  const [formError, setFormError] = useState('');
 
   const toBase64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 
@@ -92,6 +94,8 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
     setShowPassphrase(false);
     setInlinePwnedCount(null);
     setPasskeyStatus('');
+    setItemStep(0);
+    setFormError('');
   }, [editingItem, open]);
 
   const registerPasskey = async () => {
@@ -259,7 +263,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
         ...encryptedFile
       });
     } catch (err) {
-      alert('Failed to encrypt file attachment: ' + err.message);
+      setFormError('Failed to encrypt file attachment: ' + err.message);
     }
   };
 
@@ -279,13 +283,18 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formName) return;
+    if (!formName.trim()) {
+      setFormError('Enter an item name before saving.');
+      setItemStep(0);
+      return;
+    }
+    setFormError('');
     if (checkingInlinePwned) {
-      alert('Please wait for the password breach check to finish before saving.');
+      setFormError('Please wait for the password breach check to finish before saving.');
       return;
     }
     if (inlinePwnedCount > 0) {
-      alert('This password appears in public data breaches. Please choose a different password before saving.');
+      setFormError('This password appears in public data breaches. Please choose a different password before saving.');
       return;
     }
 
@@ -322,7 +331,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: { xs: 0, sm: 4 }, p: 1, m: { xs: 0, sm: 2 }, maxHeight: { xs: '100%', sm: 'calc(100% - 64px)' } } }}>
       <DialogTitle sx={{ fontWeight: 800, fontSize: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>{editingItem ? 'Edit Vault Item' : 'New Vault Item & Template'}</span>
         <IconButton 
@@ -335,12 +344,20 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
       </DialogTitle>
       <DialogContent dividers>
         <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mt: 1 }}>
+          <Stepper activeStep={itemStep} alternativeLabel sx={{ mb: 1 }}>
+            <Step><StepLabel>Basics</StepLabel></Step>
+            <Step><StepLabel>Details</StepLabel></Step>
+          </Stepper>
+          {formError && <Alert severity="error">{formError}</Alert>}
+          <Box sx={{ display: itemStep === 0 ? 'flex' : 'none', flexDirection: 'column', gap: 2.5 }}>
           <TextField
             label="Item Name"
             required
             fullWidth
             value={formName}
-            onChange={(e) => setFormName(e.target.value)}
+            onChange={(e) => { setFormName(e.target.value); if (e.target.value.trim()) setFormError(''); }}
+            error={Boolean(formError && !formName.trim())}
+            helperText={formError && !formName.trim() ? formError : 'Use a recognizable name, such as GitHub or Personal email.'}
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
 
@@ -408,6 +425,8 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
           </Box>
 
           {/* Website / Login URI (Bitwarden feature) */}
+          </Box>
+          <Box sx={{ display: itemStep === 1 ? 'flex' : 'none', flexDirection: 'column', gap: 2.5 }}>
           {(formCategory === 'Logins' || formCategory === 'Passkeys') && (
             <TextField
               label="Website / Service URL (e.g. https://github.com)"
@@ -499,7 +518,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                     InputProps={{
                       endAdornment: (
                         <InputAdornment position="end">
-                          <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
+                          <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" aria-label={showPassword ? 'Hide password' : 'Show password'}>
                             {showPassword ? <VisibilityOff /> : <Visibility />}
                           </IconButton>
                         </InputAdornment>
@@ -571,7 +590,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             <Box sx={{ p: 2.5, border: 1, borderColor: 'primary.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 700 }}>🪙 Crypto Wallet Template</Typography>
-                <IconButton size="small" onClick={() => setShowSeed(!showSeed)}>
+                <IconButton size="small" onClick={() => setShowSeed(!showSeed)} aria-label={showSeed ? 'Hide recovery seed' : 'Show recovery seed'}>
                   {showSeed ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                 </IconButton>
               </Box>
@@ -601,7 +620,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             <Box sx={{ p: 2.5, border: 1, borderColor: 'primary.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 700 }}>🖥️ Server SSH Key Template</Typography>
-                <IconButton size="small" onClick={() => setShowKey(!showKey)}>
+                <IconButton size="small" onClick={() => setShowKey(!showKey)} aria-label={showKey ? 'Hide private key' : 'Show private key'}>
                   {showKey ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                 </IconButton>
               </Box>
@@ -794,11 +813,16 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             onChange={(e) => setFormNotes(e.target.value)}
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
+          </Box>
         </Box>
       </DialogContent>
-      <DialogActions sx={{ p: 2.5 }}>
-        <Button onClick={onClose} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>Cancel</Button>
-        <Button onClick={handleSubmit} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Save Item</Button>
+      <DialogActions sx={{ p: 2.5, position: 'sticky', bottom: 0, bgcolor: 'background.paper', zIndex: 1, borderTop: 1, borderColor: 'divider' }}>
+        <Button onClick={itemStep === 0 ? onClose : () => setItemStep(0)} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>{itemStep === 0 ? 'Cancel' : 'Back'}</Button>
+        {itemStep === 0 ? (
+          <Button onClick={() => { if (!formName.trim()) { setFormError('Enter an item name to continue.'); return; } setFormError(''); setItemStep(1); }} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Continue</Button>
+        ) : (
+          <Button onClick={handleSubmit} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Save Item</Button>
+        )}
       </DialogActions>
     </Dialog>
   );

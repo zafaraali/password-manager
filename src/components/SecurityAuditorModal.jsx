@@ -28,17 +28,16 @@ export default function SecurityAuditorModal({ open, onClose, vaultItems = [] })
 
   const handleScanPwnedPasswords = async () => {
     setCheckingPwned(true);
-    const results = {};
-    const uniquePasswords = Array.from(new Set(vaultItems.map(i => i.password).filter(Boolean)));
-    
-    for (const pwd of uniquePasswords) {
-      const count = await CryptoEngine.checkPwnedPassword(pwd);
-      results[pwd] = count;
+    try {
+      const results = {};
+      const uniquePasswords = Array.from(new Set(vaultItems.map(i => i.password).filter(Boolean)));
+      for (const pwd of uniquePasswords) results[pwd] = await CryptoEngine.checkPwnedPassword(pwd);
+      setPwnedMap(results);
+      setPwnedScanned(true);
+      setTab(1);
+    } finally {
+      setCheckingPwned(false);
     }
-    setPwnedMap(results);
-    setCheckingPwned(false);
-    setPwnedScanned(true);
-    setTab(1); // Switch to Breached tab
   };
 
   const analysis = vaultItems.map(item => {
@@ -131,10 +130,10 @@ export default function SecurityAuditorModal({ open, onClose, vaultItems = [] })
 
   // Calculate vault health score (0 - 100)
   let penalty = (breachedItems.length * 35) + (weakItems.length * 20) + (reusedItems.length * 15) + (missing2faItems.length * 5) + (oldItems.length * 5);
-  const healthScore = Math.max(0, Math.min(100, Math.round(100 - (vaultItems.length > 0 ? (penalty / vaultItems.length) : 0))));
+  const healthScore = vaultItems.length > 0 ? Math.max(0, Math.min(100, Math.round(100 - (penalty / vaultItems.length)))) : null;
 
   const getHealthColor = () => {
-    if (healthScore >= 80) return 'success';
+    if (healthScore === null || healthScore >= 80) return 'success';
     if (healthScore >= 50) return 'warning';
     return 'error';
   };
@@ -175,7 +174,7 @@ export default function SecurityAuditorModal({ open, onClose, vaultItems = [] })
                 Vault Health Rating
               </Typography>
               <Typography variant="h5" sx={{ fontWeight: 800, color: `${getHealthColor()}.main` }}>
-                {healthScore}%
+                {healthScore === null ? 'Not rated' : `${healthScore}%`}
               </Typography>
             </Box>
             <LinearProgress 

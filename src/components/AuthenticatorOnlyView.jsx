@@ -20,13 +20,7 @@ export default function AuthenticatorOnlyView({ onBackToLogin, settings }) {
         setAuthItems(JSON.parse(saved));
       } catch (e) { }
     } else {
-      // Default sample 2FA if empty
-      const initial = [
-        { id: '1', name: 'Google (sample@gmail.com)', secret: 'JBSWY3DPEHPK3PXP' },
-        { id: '2', name: 'GitHub (developer)', secret: 'GEZDGNBVGY3TQOJQ' }
-      ];
-      setAuthItems(initial);
-      localStorage.setItem('ciphervault_standalone_2fa', JSON.stringify(initial));
+      setAuthItems([]);
     }
   }, []);
 

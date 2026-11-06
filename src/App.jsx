@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ThemeProvider, createTheme, CssBaseline, Container, Box, Snackbar } from '@mui/material';
+import { ThemeProvider, createTheme, CssBaseline, Container, Box, Snackbar, CircularProgress, Typography } from '@mui/material';
 import Navbar from './components/Navbar';
 import SetupView from './components/SetupView';
 import UnlockView from './components/UnlockView';
@@ -58,6 +58,7 @@ export default function App() {
   const [currentProfile, setCurrentProfile] = useState('Default');
 
   const [view, setView] = useState('loading');
+  const [initializing, setInitializing] = useState(true);
   const [key, setKey] = useState(null);
   const [vaultItems, setVaultItems] = useState([]);
   const [trashItems, setTrashItems] = useState([]);
@@ -88,6 +89,7 @@ export default function App() {
     const activeProf = localStorage.getItem('ciphervault_active_profile') || 'Default';
     setCurrentProfile(activeProf);
     checkProfileState(activeProf);
+    setInitializing(false);
   }, []);
 
   const handleSaveSettings = (newSettings, persist = true) => {
@@ -411,7 +413,12 @@ export default function App() {
             />
           )}
 
-          {view === 'setup' && (
+          {initializing || view === 'loading' ? (
+            <Box sx={{ minHeight: 320, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+              <CircularProgress size={34} />
+              <Typography color="text.secondary">Loading your vault…</Typography>
+            </Box>
+          ) : view === 'setup' ? (
             <SetupView 
               profileName={currentProfile} 
               onSetupSuccess={(derivedKey, items = [], trash = []) => {
@@ -422,9 +429,7 @@ export default function App() {
                 setSuccessMsg('Vault created and unlocked successfully!');
               }} 
             />
-          )}
-
-          {view === 'unlock' && (
+          ) : view === 'unlock' ? (
             <UnlockView 
               profileName={currentProfile}
               profiles={profiles}
@@ -437,16 +442,12 @@ export default function App() {
               onSwitchToSetup={() => setView('setup')}
               onOpenAuthenticatorOnly={() => setView('authenticator_only')}
             />
-          )}
-
-          {view === 'authenticator_only' && (
+          ) : view === 'authenticator_only' ? (
             <AuthenticatorOnlyView 
               onBackToLogin={() => checkProfileState(currentProfile)}
               settings={settings}
             />
-          )}
-
-          {view === 'vault' && (
+          ) : view === 'vault' ? (
             <VaultDashboard 
               vaultItems={vaultItems}
               trashItems={trashItems}
@@ -465,7 +466,7 @@ export default function App() {
               activeKey={key}
               settings={settings}
             />
-          )}
+          ) : null}
         </Container>
 
         <SecurityAuditorModal

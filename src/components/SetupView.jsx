@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Paper, Typography, TextField, Button, Box, Alert } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { Paper, Typography, TextField, Button, Box, Alert, Chip } from '@mui/material';
 import { CryptoEngine } from '../utils/crypto';
 
 export default function SetupView({ onSetupSuccess, profileName }) {
@@ -10,9 +10,10 @@ export default function SetupView({ onSetupSuccess, profileName }) {
   const [loading, setLoading] = useState(false);
   const [generatedRecoveryCode, setGeneratedRecoveryCode] = useState('');
   const [derivedVaultKey, setDerivedVaultKey] = useState(null);
+  const [recoveryCopied, setRecoveryCopied] = useState(false);
 
   // Clean up any historical insecure temp password in localStorage
-  useState(() => {
+  useEffect(() => {
     try {
       localStorage.removeItem('ciphervault_temp_pw');
     } catch (e) {}
@@ -74,19 +75,31 @@ export default function SetupView({ onSetupSuccess, profileName }) {
             {generatedRecoveryCode}
           </Typography>
         </Paper>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' }, gap: 1, mb: 3 }}>
+          <Chip label="✓ Recovery code saved" color="success" variant="outlined" />
+          <Chip label="Next: add an item" color="primary" variant="outlined" />
+          <Chip label="Then: secure your session" variant="outlined" />
+        </Box>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 3 }}>
+          <Chip label="Next: add a login, note, or authenticator token" variant="outlined" color="primary" />
+          <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
+            You can enable PIN unlock, import an existing vault, and review security settings from the dashboard.
+          </Typography>
+        </Box>
         <Button
           fullWidth
           variant="contained"
           size="large"
           onClick={() => {
             navigator.clipboard.writeText(generatedRecoveryCode);
-            alert('Recovery code copied to clipboard!');
+            setRecoveryCopied(true);
             onSetupSuccess(derivedVaultKey, [], []);
           }}
           sx={{ py: 1.5, fontWeight: 600, color: '#fff' }}
         >
           I Have Saved My Recovery Code — Continue to Vault
         </Button>
+        {recoveryCopied && <Alert severity="success" sx={{ mt: 2 }}>Recovery code copied. Your vault is ready.</Alert>}
       </Paper>
     );
   }

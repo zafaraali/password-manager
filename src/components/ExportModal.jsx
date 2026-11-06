@@ -149,7 +149,25 @@ export default function ExportModal({ open, onClose, profileName, vaultItems = [
     const created = localStorage.getItem(`ciphervault_created${pfx}`) || new Date().toISOString();
     const qrPayload = `ciphervault://recover?profile=${encodeURIComponent(profileName)}&code=${encodeURIComponent(recovery)}&encryptedBackup=${Boolean(localStorage.getItem(`ciphervault_vault${pfx}`))}`;
     const qr = QRCodeEncoder.renderSvg(qrPayload, { size: 180, margin: 3 });
-    const win = window.open('', '_blank', 'noopener,noreferrer');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>CipherVault Emergency Recovery Sheet</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:48px auto;color:#111}h1{font-size:28px}.card{border:2px solid #111;border-radius:14px;padding:24px;margin:24px 0}.code{font:700 24px monospace;letter-spacing:3px;word-break:break-all;background:#eee;padding:18px}.grid{display:flex;gap:30px;align-items:center}small{color:#555}@media print{button{display:none}}</style></head><body><h1>CipherVault Emergency Recovery Sheet</h1><p><b>Profile:</b> ${profileName}<br><b>Created:</b> ${new Date(created).toLocaleDateString()}</p><div class="card"><h2>Emergency recovery code</h2><div class="code">${recovery}</div><p><small>Keep this sheet offline. Anyone with this code may be able to recover the vault.</small></p></div><div class="card grid"><div><h2>Offline recovery marker</h2><p>Store this QR with your encrypted vault backup. It contains recovery metadata only.</p></div>${qr}</div><div class="card"><h2>Safe storage guidelines</h2><ul><li>Print only on a trusted printer.</li><li>Store in a sealed envelope inside a safe or deposit box.</li><li>Never photograph or upload this sheet.</li><li>Destroy old sheets when rotating your recovery code.</li></ul></div><button onclick="print()">Print sheet</button></body></html>`;
+    const blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+    const printWindow = window.open(blobUrl, '_blank');
+    if (!printWindow) {
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `ciphervault-${profileName}-emergency-recovery.html`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      return;
+    }
+    printWindow.addEventListener('load', () => {
+      printWindow.focus();
+      printWindow.print();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    }, { once: true });
+    return;
+    // Keep the window handle writable so the generated recovery sheet can be populated before printing.
+    const win = window.open('', '_blank');
     if (!win) return;
     win.document.write(`<!doctype html><html><head><title>CipherVault Emergency Recovery Sheet</title><style>body{font-family:Arial,sans-serif;max-width:760px;margin:48px auto;color:#111}h1{font-size:28px}.card{border:2px solid #111;border-radius:14px;padding:24px;margin:24px 0}.code{font:700 24px monospace;letter-spacing:3px;word-break:break-all;background:#eee;padding:18px}.grid{display:flex;gap:30px;align-items:center}small{color:#555}@media print{button{display:none}}</style></head><body><h1>CipherVault Emergency Recovery Sheet</h1><p><b>Profile:</b> ${profileName}<br><b>Created:</b> ${new Date(created).toLocaleDateString()}</p><div class="card"><h2>Emergency recovery code</h2><div class="code">${recovery}</div><p><small>Keep this sheet offline. Anyone with this code may be able to recover the vault.</small></p></div><div class="card grid"><div><h2>Offline recovery marker</h2><p>Store this QR with your encrypted vault backup. It contains recovery metadata only.</p></div>${qr}</div><div class="card"><h2>Safe storage guidelines</h2><ul><li>Print only on a trusted printer.</li><li>Store in a sealed envelope inside a safe or deposit box.</li><li>Never photograph or upload this sheet.</li><li>Destroy old sheets when rotating your recovery code.</li></ul></div><button onclick="print()">Print sheet</button></body></html>`);
     win.document.close();

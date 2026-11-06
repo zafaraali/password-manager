@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, 
-  FormControlLabel, Switch, Slider, TextField, Divider, Alert 
+  FormControlLabel, Switch, Slider, TextField, Divider, Alert, Tabs, Tab
 } from '@mui/material';
 import { CryptoEngine } from '../utils/crypto';
 import { TOTP } from '../utils/totp';
@@ -19,6 +19,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
   const [pinMsg, setPinMsg] = useState('');
   const [pinError, setPinError] = useState('');
   const [clockSync, setClockSync] = useState({ status: '', loading: false });
+  const [settingsTab, setSettingsTab] = useState('appearance');
 
   useEffect(() => {
     if (open) {
@@ -31,12 +32,25 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
       setPinMsg('');
       setPinError('');
       setClockSync({ status: '', loading: false });
+      setSettingsTab('appearance');
 
       const pfx = currentProfile === 'Default' ? '' : `_${currentProfile}`;
       const isPin = localStorage.getItem(`ciphervault_pin_enabled${pfx}`) === 'true';
       setPinEnabled(isPin);
     }
   }, [settings, open, currentProfile]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const sections = ['appearance', 'authenticator', 'generator', 'security', 'danger']
+      .map(id => document.getElementById(id)).filter(Boolean);
+    const observer = new IntersectionObserver(entries => {
+      const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (visible) setSettingsTab(visible.target.id);
+    }, { root: document.querySelector('[role="dialog"]'), threshold: [0.2, 0.6] });
+    sections.forEach(section => observer.observe(section));
+    return () => observer.disconnect();
+  }, [open]);
 
   const handleChange = (key, value) => {
     setLocalSettings(prev => {
@@ -162,13 +176,20 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
   ];
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: { xs: 0, sm: 4 }, p: 1, m: { xs: 0, sm: 2 }, maxHeight: { xs: '100%', sm: 'calc(100% - 64px)' } } }}>
       <DialogTitle sx={{ fontWeight: 800, fontSize: '1.25rem' }}>⚙️ Vault Preferences & Settings</DialogTitle>
       <DialogContent dividers>
+        <Tabs value={settingsTab} onChange={(e, value) => { setSettingsTab(value); document.getElementById(value)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} variant="scrollable" scrollButtons="auto" sx={{ position: 'sticky', top: -24, zIndex: 2, bgcolor: 'background.paper', mb: 2, borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { textTransform: 'none', fontWeight: 700, minHeight: 44 } }}>
+          <Tab label="Appearance" value="appearance" />
+          <Tab label="Authenticator" value="authenticator" />
+          <Tab label="Generator" value="generator" />
+          <Tab label="Security" value="security" />
+          <Tab label="Danger zone" value="danger" />
+        </Tabs>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           
           {/* Theme & Accent Color */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <Box id="appearance" sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 700 }}>
               🎨 App Accent Color (Live Preview)
             </Typography>
@@ -203,7 +224,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
 
           <Divider />
 
-          <Box>
+          <Box id="authenticator" sx={{ scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>🕐 2FA Clock Sync</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Compare your device with UTC and compensate TOTP generation for drift.</Typography>
             <Button variant="outlined" onClick={handleClockSync} disabled={clockSync.loading} sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2 }}>{clockSync.loading ? 'Checking…' : 'Sync Clock with Atomic UTC'}</Button>
@@ -213,7 +234,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
           <Divider />
 
           {/* Quick PIN Unlock Configuration (Bitwarden & 2FAS Feature) */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 700 }}>
               ⚡ Quick PIN Unlock (Fast Session Resume)
             </Typography>
@@ -282,7 +303,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
           <Divider />
 
           {/* 2FA Preferences */}
-          <Box>
+          <Box id="authenticator-preferences" sx={{ scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>
               ⏱️ 2FA & Authenticator Preferences
             </Typography>
@@ -300,7 +321,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
           <Divider />
 
           {/* Password Generator Preferences */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box id="generator" sx={{ display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>
               🔐 Password Generator Defaults
             </Typography>
@@ -323,7 +344,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
           <Divider />
 
           {/* Security & Clipboard Preferences */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box id="security" sx={{ display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>
               🛡️ Security & Clipboard
             </Typography>
@@ -349,7 +370,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
           <Divider />
 
           {/* Danger Zone: Password-Protected Delete Vault */}
-          <Box component="form" onSubmit={handleDeleteVaultSubmit} sx={{ p: 2.5, border: 1, borderColor: 'error.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box id="danger" component="form" onSubmit={handleDeleteVaultSubmit} sx={{ p: 2.5, border: 1, borderColor: 'error.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.04)', display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="error" sx={{ fontWeight: 700 }}>
               ⚠️ Danger Zone: Password-Protected Vault Deletion
             </Typography>
@@ -375,7 +396,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
 
         </Box>
       </DialogContent>
-      <DialogActions sx={{ p: 2.5, display: 'flex', justifyContent: 'space-between' }}>
+      <DialogActions sx={{ p: 2.5, display: 'flex', justifyContent: 'space-between', position: 'sticky', bottom: 0, bgcolor: 'background.paper', zIndex: 1, borderTop: 1, borderColor: 'divider' }}>
         <Button onClick={handleClose} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>Cancel</Button>
         <Button onClick={handleSave} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Save Preferences</Button>
       </DialogActions>
