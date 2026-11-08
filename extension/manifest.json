@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "CipherVault",
+  "version": "3.5.0",
+  "minimum_chrome_version": "120",
+  "description": "Local encrypted password vault and authenticator with explicit, origin-matched autofill.",
+  "permissions": ["activeTab", "scripting", "clipboardWrite"],
+  "action": { "default_popup": "popup.html", "default_title": "CipherVault Autofill" },
+  "options_page": "index.html",
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'" }
+}

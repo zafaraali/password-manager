@@ -1,3 +1,4 @@
+import { vaultStorage, validateVault } from '../utils/storage';
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, Paper, TextField, InputAdornment } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
@@ -115,8 +116,8 @@ export default function QuickTotpModal({ open, onClose, profiles = ['Default'] }
     e.preventDefault();
     try {
       const pfx = selectedProfile === 'Default' ? '' : `_${selectedProfile}`;
-      const savedSalt = localStorage.getItem(`ciphervault_salt${pfx}`);
-      const savedCipherStr = localStorage.getItem(`ciphervault_vault${pfx}`);
+      const savedSalt = vaultStorage.get(selectedProfile)?.salt;
+      const savedCipherStr = JSON.stringify(vaultStorage.get(selectedProfile)?.vault);
       
       if (!savedCipherStr || !savedSalt) {
         setError(`No vault found for profile [${selectedProfile}].`);
@@ -126,7 +127,7 @@ export default function QuickTotpModal({ open, onClose, profiles = ['Default'] }
       const derivedKey = await CryptoEngine.deriveMasterKey(passwordPrompt, savedSalt);
       const encryptedObj = JSON.parse(savedCipherStr);
       const decryptedJson = await CryptoEngine.decryptPayload(derivedKey, encryptedObj);
-      const parsedData = JSON.parse(decryptedJson);
+      const parsedData = validateVault(JSON.parse(decryptedJson));
       const items = Array.isArray(parsedData) ? parsedData : (parsedData.items || []);
 
       const secrets = items.filter(i => i.totpSecret);

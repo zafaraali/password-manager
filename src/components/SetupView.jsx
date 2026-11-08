@@ -1,23 +1,28 @@
-import React, { useState, useEffect } from 'react';
+import { vaultStorage } from '../utils/storage';
+import { pinSession } from '../utils/pinSession';
+import { useFeedback } from './FeedbackProvider';
+import React, { useState, useEffect, useRef } from 'react';
 import { Paper, Typography, TextField, Button, Box, Alert, Chip } from '@mui/material';
 import { CryptoEngine } from '../utils/crypto';
 
 export default function SetupView({ onSetupSuccess, profileName }) {
+  const active = useRef(true);
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+  const { confirm } = useFeedback();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [hint, setHint] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [generatedRecoveryCode, setGeneratedRecoveryCode] = useState('');
+  const [createdRevision, setCreatedRevision] = useState(null);
   const [derivedVaultKey, setDerivedVaultKey] = useState(null);
-  const [recoveryCopied, setRecoveryCopied] = useState(false);
 
   // Clean up any historical insecure temp password in localStorage
   useEffect(() => {
     try {
       localStorage.removeItem('ciphervault_temp_pw');
     } catch (e) {}
-  });
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -34,12 +39,13 @@ export default function SetupView({ onSetupSuccess, profileName }) {
       return;
     }
 
+    if (loading) return;
     setLoading(true);
     setError('');
     try {
-      const pfx = profileName === 'Default' ? '' : `_${profileName}`;
       const newSalt = await CryptoEngine.generateSalt();
-      const recoveryCode = await CryptoEngine.generateRecoveryCode();
+      const record = vaultStorage.get(profileName);
+      if (record?.vault && !await confirm({ title: 'Replace existing vault?', message: 'This creates an empty vault. Export a backup first. The previous encrypted version will also be retained locally.', confirmLabel: 'Replace vault', severity: 'error' })) return;
       const derivedKey = await CryptoEngine.deriveMasterKey(password, newSalt);
       
       const initialItems = [];
@@ -47,13 +53,13 @@ export default function SetupView({ onSetupSuccess, profileName }) {
       const vaultPayload = { items: initialItems, trash: [] };
       const encrypted = await CryptoEngine.encryptPayload(derivedKey, JSON.stringify(vaultPayload));
       
-      localStorage.setItem(`ciphervault_salt${pfx}`, newSalt);
-      localStorage.setItem(`ciphervault_vault${pfx}`, JSON.stringify(encrypted));
-      localStorage.setItem(`ciphervault_recovery${pfx}`, recoveryCode);
-      if (hint) localStorage.setItem(`ciphervault_hint${pfx}`, hint);
+      const next = await vaultStorage.commit(profileName, record.revision, () => ({ salt: newSalt, vault: encrypted, hint, created: new Date().toISOString() }), () => active.current);
+      if (!active.current) return;
+      pinSession.clear(profileName);
 
       setDerivedVaultKey(derivedKey);
-      setGeneratedRecoveryCode(recoveryCode);
+      setCreatedRevision(next.revision);
+      setPassword(''); setConfirmPassword('');
     } catch (err) {
       setError('Setup failed: ' + err.message);
     } finally {
@@ -61,22 +67,22 @@ export default function SetupView({ onSetupSuccess, profileName }) {
     }
   };
 
-  if (generatedRecoveryCode) {
+  if (createdRevision !== null) {
     return (
       <Paper elevation={3} sx={{ p: 4, borderRadius: 3, border: 1, borderColor: 'divider' }}>
         <Typography variant="h5" gutterBottom sx={{ fontWeight: 600, color: 'success.main' }}>
           🎉 Vault Created ({profileName})!
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Please save your Emergency Recovery Code. If you ever forget your master password, you can use this code to reset and recover access.
+          Export an encrypted backup from the vault and keep your master password safe. There is no password reset or recovery code. A backup requires its original master password.
         </Typography>
         <Paper sx={{ p: 2, bgcolor: 'action.hover', mb: 3, textAlign: 'center' }}>
           <Typography variant="h6" sx={{ fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1 }}>
-            {generatedRecoveryCode}
+            Keep an encrypted backup
           </Typography>
         </Paper>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' }, gap: 1, mb: 3 }}>
-          <Chip label="✓ Recovery code saved" color="success" variant="outlined" />
+          <Chip label="Backup needed" color="success" variant="outlined" />
           <Chip label="Next: add an item" color="primary" variant="outlined" />
           <Chip label="Then: secure your session" variant="outlined" />
         </Box>
@@ -91,15 +97,12 @@ export default function SetupView({ onSetupSuccess, profileName }) {
           variant="contained"
           size="large"
           onClick={() => {
-            navigator.clipboard.writeText(generatedRecoveryCode);
-            setRecoveryCopied(true);
-            onSetupSuccess(derivedVaultKey, [], []);
+            onSetupSuccess(derivedVaultKey, [], [], createdRevision);
           }}
           sx={{ py: 1.5, fontWeight: 600, color: '#fff' }}
         >
-          I Have Saved My Recovery Code — Continue to Vault
+          Continue to Vault
         </Button>
-        {recoveryCopied && <Alert severity="success" sx={{ mt: 2 }}>Recovery code copied. Your vault is ready.</Alert>}
       </Paper>
     );
   }
@@ -152,7 +155,7 @@ export default function SetupView({ onSetupSuccess, profileName }) {
           disabled={loading}
           sx={{ py: 1.5, fontWeight: 600, textTransform: 'none', fontSize: '1rem', color: '#fff' }}
         >
-          {loading ? 'Initializing Vault & Deriving Key...' : 'Create Vault & Generate Recovery Code'}
+          {loading ? 'Initializing Vault & Deriving Key...' : 'Create Vault'}
         </Button>
       </Box>
     </Paper>

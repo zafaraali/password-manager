@@ -33,8 +33,8 @@ export class TOTP {
       bits += parseInt(hex[i], 16).toString(2).padStart(4, '0');
     }
     let base32 = '';
-    for (let i = 0; i + 5 <= bits.length; i += 5) {
-      const chunk = bits.substr(i, 5);
+    for (let i = 0; i < bits.length; i += 5) {
+      const chunk = bits.substr(i, 5).padEnd(5, '0');
       base32 += base32chars[parseInt(chunk, 2)];
     }
     return base32;
@@ -104,7 +104,7 @@ export class TOTP {
       if (!hexKey) return 'Invalid 2FA';
 
       const clockDrift = this.getClockOffset();
-      const epoch = Math.floor(Date.now() / 1000) + clockDrift + epochOffset;
+      const epoch = Math.floor(config.timestamp ?? Date.now() / 1000) + clockDrift + epochOffset;
       const time = Math.floor(epoch / window_time);
       const timeHex = time.toString(16).padStart(16, '0');
       
@@ -201,16 +201,9 @@ export class TOTP {
 
   static parseGoogleMigrationUrl(urlStr) {
     try {
-      let dataParam = '';
-      if (urlStr.includes('data=')) {
-        const parts = urlStr.split('data=');
-        if (parts[1]) {
-          dataParam = decodeURIComponent(parts[1].split('&')[0]);
-        }
-      } else {
-        const url = new URL(urlStr);
-        dataParam = url.searchParams.get('data');
-      }
+      const url = new URL(urlStr);
+      let dataParam = url.searchParams.get('data') || '';
+      if (!dataParam && urlStr.includes('data=')) dataParam = decodeURIComponent(urlStr.split('data=')[1].split('&')[0]);
 
       if (!dataParam) throw new Error('Missing data parameter in migration URL');
       return this.parseProtobufMigrationBase64(dataParam);
@@ -220,7 +213,9 @@ export class TOTP {
   }
 
   static parseProtobufMigrationBase64(b64Str) {
-    const binStr = atob(b64Str.replace(/-/g, '+').replace(/_/g, '/'));
+    let normalized = (b64Str || '').replace(/\s/g, '').replace(/-/g, '+').replace(/_/g, '/');
+    normalized += '='.repeat((4 - (normalized.length % 4)) % 4);
+    const binStr = atob(normalized);
     const bytes = Uint8Array.from(binStr, c => c.charCodeAt(0));
     
     let accounts = [];
@@ -237,7 +232,7 @@ export class TOTP {
         while (i < bytes.length) {
           const b = bytes[i++];
           length |= (b & 0x7f) << shift;
-          if (!(b & 0x7f)) break;
+          if (!(b & 0x80)) break;
           shift += 7;
           if (shift >= 28) break;
         }
@@ -264,6 +259,9 @@ export class TOTP {
     let secretBytes = null;
     let name = 'Google Auth Account';
     let issuer = '';
+    let algorithm = 'SHA1';
+    let digits = 6;
+    let type = 'totp';
 
     while (i < bytes.length) {
       const tag = bytes[i++];
@@ -276,7 +274,7 @@ export class TOTP {
         while (i < bytes.length) {
           const b = bytes[i++];
           length |= (b & 0x7f) << shift;
-          if (!(b & 0x7f)) break;
+          if (!(b & 0x80)) break;
           shift += 7;
         }
         const valBytes = bytes.slice(i, i + length);
@@ -290,7 +288,11 @@ export class TOTP {
           issuer = new TextDecoder().decode(valBytes);
         }
       } else if (wireType === 0) {
-        while (i < bytes.length && (bytes[i++] & 0x80));
+        let value = 0, shift = 0, byte;
+        do { byte = bytes[i++]; value |= (byte & 127) << shift; shift += 7; } while ((byte & 128) && i < bytes.length && shift < 35);
+        if (fieldNum === 4) algorithm = ({ 1: 'SHA1', 2: 'SHA256', 3: 'SHA512' })[value] || 'Unsupported';
+        if (fieldNum === 5) digits = ({ 1: 6, 2: 8 })[value] || 0;
+        if (fieldNum === 6 && value === 1) type = 'hotp';
       } else {
         break;
       }
@@ -307,7 +309,8 @@ export class TOTP {
     return {
       name: issuer ? `${issuer} (${name})` : name,
       username: name,
-      secret: base32Secret
+      secret: base32Secret,
+      issuer, algorithm, digits, type
     };
   }
 
@@ -318,12 +321,13 @@ export class TOTP {
     services.forEach(svc => {
       const name = svc.name || svc.issuer || '2FAS Service';
       const secret = svc.secret || (svc.otp && svc.otp.secret) || '';
-      const email = svc.email || svc.account || '';
+      const email = svc.otp?.account || svc.email || svc.account || '';
       if (secret) {
         accounts.push({
           name: name,
           username: email,
-          secret: secret
+          secret: secret,
+          issuer: svc.otp?.issuer || '', algorithm: svc.otp?.algorithm || 'SHA1', digits: svc.otp?.digits || 6, period: svc.otp?.period || 30
         });
       }
     });

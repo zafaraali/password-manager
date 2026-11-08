@@ -1,14 +1,14 @@
 # CipherVault
 
-CipherVault is a local-first, zero-knowledge password manager and 2FA authenticator combining the best power features of **Bitwarden** and **2FAS**, built with React, Material-UI (MUI), and client-side cryptography. All sensitive data is encrypted and decrypted locally in the browser to ensure absolute privacy and security.
+CipherVault is a local-first, zero-knowledge password manager and 2FA authenticator combining the best power features of **Bitwarden** and **2FAS**, built with React, Material-UI (MUI), and client-side cryptography. Vault data is encrypted and decrypted locally in the browser. Keep an encrypted backup and its original master password; there is no password reset or recovery code.
 
 ## Key Features
 
 ### 🛡️ Security & Cryptography
 * **Zero-Knowledge Client-Side Encryption:** All vault records and attachments are encrypted using AES-256-GCM.
 * **Key Derivation:** PBKDF2 with 600,000 iterations and a cryptographically secure random salt.
-* **Quick PIN Session Unlock:** Wrap and encrypt your master key using a 4–8 digit PIN to quickly unlock your vault in $<1$ second during daily work sessions.
-* **Memory-Safe Architecture:** Keys remain strictly in React component memory; raw master passwords are never stored in `localStorage`.
+* **Quick PIN Session Unlock:** PIN-wrapped keys exist only in page memory. Refreshing, closing the page, or switching profiles requires the master password. Five failed PIN attempts disable quick unlock. Historical persistent PIN wrappers are removed during migration.
+* **In-Memory Sessions:** Unlocked keys and plaintext records stay in page memory. Locking discards session state and cancels pending writes. Browser JavaScript cannot guarantee memory zeroization.
 * **Profile Management:** Enforces single-vault-per-username constraints with safe local profile renaming and data migration.
 * **Protected Deletion:** Vault deletion requires cryptographic verification via the master password.
 
@@ -20,7 +20,7 @@ CipherVault is a local-first, zero-knowledge password manager and 2FA authentica
 * **In-App 2FA QR Code Generator:** Generate on-screen pairing QR codes to scan tokens directly into your mobile 2FAS app or Google Authenticator.
 * **Custom Tags & Groups:** Organize accounts with 2FAS-style tags (`#Work`, `#Personal`, `#Finance`, `#Crypto`) and filter items instantly.
 * **Universal 2FA Import & Export:** Two-way compatibility with official `.2fas` backup files, Google Authenticator migration links (`otpauth-migration://`), and raw `otpauth://` links.
-* **Standalone Quick 2FA View:** Quickly inspect and copy your 2FA codes directly from the lock screen.
+* **Encrypted 2FA View:** Authenticate from the lock screen to open the 2FA view. Accounts share vault encryption and auto-lock behavior. Existing unencrypted standalone accounts can be migrated into a chosen unlocked profile; plaintext is removed only after the encrypted save succeeds.
 
 ### 🔐 Bitwarden Password Manager Features
 * **HaveIBeenPwned (HIBP) Breach Checker:** Audits all vault passwords against billions of leaked credentials using privacy-preserving zero-knowledge k-Anonymity (SHA-1 prefix search).
@@ -41,7 +41,7 @@ CipherVault is a local-first, zero-knowledge password manager and 2FA authentica
 
 ### 📱 Progressive Web App (PWA)
 * **Installable Native App:** Install CipherVault on Windows, macOS, Android, and iOS as a standalone desktop or mobile application.
-* **100% Offline Capable:** Built-in Service Worker caching ensures full functionality without an active internet connection.
+* **Offline Access:** Previously loaded app views and encrypted local vaults can work offline. Breach checks and clock synchronization require a network connection.
 
 ### 🎨 Customization
 * **Accent Themes:** Switch between Indigo, Pure Blue, Emerald Green, Sunset Amber, Ruby Red, and Cyber Purple with live real-time previewing.
@@ -52,7 +52,15 @@ CipherVault is a local-first, zero-knowledge password manager and 2FA authentica
 * **Frontend:** React, Vite
 * **UI Framework:** Material-UI (MUI) & Emotion
 * **Cryptography:** Web Crypto API (`crypto.subtle` AES-GCM and PBKDF2)
-* **Storage:** Browser LocalStorage (Zero server persistence, zero tracking)
+* **Storage:** Browser LocalStorage with atomic profile records, Web Locks transactions, revision checks, and one retained previous encrypted version (no server persistence)
+
+## Data safety and backups
+
+Use HTTPS or localhost in a browser with Web Locks support. Existing vaults are migrated before old storage keys are removed. Storage write failures preserve the committed vault. Concurrent tabs reject stale edits and lock when another tab changes their vault.
+
+Replacing a vault requires explicit confirmation. Backup imports must decrypt with the original master password and pass schema validation before replacement. Export the retained previous encrypted version from the Export dialog if needed, then import it using that version's original master password. The previous version is replaced on each successful vault write and is deleted with its profile; it is not a substitute for an external backup. Deleted items can remain in that previous encrypted version until the next write.
+
+Old recovery codes were never connected to a recovery mechanism and cannot recover a vault. They are no longer generated or included in exports. Keep the original master password; a separate export password provides an additional encryption layer and does not replace it.
 
 ## Installation and Setup
 

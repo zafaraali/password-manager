@@ -1,7 +1,9 @@
 import React from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, Paper } from '@mui/material';
+import { useFeedback } from './FeedbackProvider';
 
 export default function PasswordHistoryModal({ open, onClose, item, onRestoreOldPassword }) {
+  const { notify } = useFeedback();
   const history = item?.passwordHistory || [];
 
   return (
@@ -34,7 +36,7 @@ export default function PasswordHistoryModal({ open, onClose, item, onRestoreOld
                     variant="outlined" 
                     onClick={() => {
                       navigator.clipboard.writeText(entry.password);
-                      alert('Previous password copied to clipboard!');
+                      notify('Previous password copied to clipboard!', 'success');
                     }}
                   >
                     Copy
@@ -43,9 +45,11 @@ export default function PasswordHistoryModal({ open, onClose, item, onRestoreOld
                     size="small" 
                     color="primary" 
                     variant="contained" 
-                    onClick={() => {
-                      onRestoreOldPassword(item.id, entry.password);
-                      onClose();
+                    onClick={async () => {
+                      try {
+                        await onRestoreOldPassword(item.id, entry.password);
+                        onClose();
+                      } catch (error) { notify(error.message, 'error'); }
                     }}
                   >
                     Restore

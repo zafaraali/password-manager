@@ -9,7 +9,7 @@ import SecurityIcon from '@mui/icons-material/Security';
 import DangerousIcon from '@mui/icons-material/Dangerous';
 import { CryptoEngine } from '../utils/crypto';
 
-export default function SecurityAuditorModal({ open, onClose, vaultItems = [] }) {
+export default function SecurityAuditorModal({ open, onClose, vaultItems = [], onRepairItem }) {
   const [tab, setTab] = useState(0);
   const [pwnedMap, setPwnedMap] = useState({});
   const [checkingPwned, setCheckingPwned] = useState(false);
@@ -218,7 +218,7 @@ export default function SecurityAuditorModal({ open, onClose, vaultItems = [] })
                       {item.issues.length > 0 ? item.issues.join(' • ') : '✨ Secure & optimal'}
                     </Typography>
                   </Box>
-                  <Chip label={item.score} color={item.color} size="small" sx={{ fontWeight: 700 }} />
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}><Chip label={item.score} color={item.color} size="small" sx={{ fontWeight: 700 }} />{(item.isWeak || item.isReused || item.isOld) && <Button size="small" variant="outlined" onClick={() => onRepairItem?.(item)} sx={{ textTransform: 'none' }}>Generate stronger password</Button>}</Box>
                 </Paper>
               ))}
             </Box>
@@ -237,6 +237,8 @@ export default function SecurityAuditorModal({ open, onClose, vaultItems = [] })
                     Check Vault Passwords for Breaches
                   </Button>
                 </Paper>
+              ) : vaultItems.some(item => item.password && pwnedMap[item.password] == null) ? (
+                <Alert severity="warning">Some breach checks were unavailable. Retry when online; these passwords have not been verified.</Alert>
               ) : breachedItems.length === 0 ? (
                 <Alert severity="success">🎉 None of your vault passwords were found in public data breaches!</Alert>
               ) : (

@@ -34,13 +34,6 @@ export class CryptoEngine {
     return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  static async generateRecoveryCode() {
-    const array = new Uint8Array(12);
-    crypto.getRandomValues(array);
-    const hex = Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
-    return `${hex.slice(0,4)}-${hex.slice(4,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}`.toUpperCase();
-  }
-
   static async encryptPayload(key, plaintext) {
     const enc = new TextEncoder();
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -157,7 +150,7 @@ export class CryptoEngine {
 
   /**
    * Checks if a password has been compromised in data breaches using zero-knowledge k-Anonymity.
-   * Returns breach count (0 if safe).
+   * Returns breach count (0 for no match), or null when unavailable.
    */
   static async checkPwnedPassword(password) {
     if (!password) return 0;
@@ -166,21 +159,23 @@ export class CryptoEngine {
       const prefix = hash.slice(0, 5);
       const suffix = hash.slice(5);
 
-      const res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`);
+      const res = await fetch(`https://api.pwnedpasswords.com/range/${prefix}`, { headers: { "Add-Padding": "true" }, cache: "no-store", signal: AbortSignal.timeout(10000) });
       if (!res.ok) return null;
       const text = await res.text();
 
-      const lines = text.split("\n");
+      const lines = text.trim().split("\n").map(line => line.trim());
+      if (!lines.length || lines.some(line => !/^[A-F0-9]{35}:\d+$/.test(line))) return null;
       for (const line of lines) {
         const [hSuffix, count] = line.trim().split(":");
         if (hSuffix === suffix) {
-          return parseInt(count, 10) || 0;
+          const result = Number(count);
+          return Number.isSafeInteger(result) ? result : null;
         }
       }
-      return null;
-    } catch (e) {
-      // In case of network interruption, gracefully return 0
       return 0;
+    } catch (e) {
+      // Unavailable is distinct from a successful search with no match.
+      return null;
     }
   }
 }

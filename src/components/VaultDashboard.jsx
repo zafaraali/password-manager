@@ -23,13 +23,16 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import SortIcon from '@mui/icons-material/Sort';
 import ViewListIcon from '@mui/icons-material/ViewList';
 import GridViewIcon from '@mui/icons-material/GridView';
+import ClearIcon from '@mui/icons-material/Clear';
 import { copyToClipboard } from '../utils/clipboard';
+import { useFeedback } from './FeedbackProvider';
 
 export default function VaultDashboard({ 
   vaultItems = [], trashItems = [], onSaveItem, onDeleteItem, onRestoreItem, onDeletePermanent,
   profiles, currentProfile, onSwitchProfile, onCreateProfile, onDeleteProfile, onImportTotpJson,
-  onImportVaultJson, onImportItems, activeKey, settings
+  onImportVaultJson, onImportItems, activeKey, settings, authenticatorItems = []
 }) {
+  const { notify, input } = useFeedback();
   const [filterCategory, setFilterCategory] = useState('All');
   const [selectedTag, setSelectedTag] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -41,8 +44,27 @@ export default function VaultDashboard({
   const [copiedMsg, setCopiedMsg] = useState('');
   const [clipboardRemaining, setClipboardRemaining] = useState(0);
   const [sortBy, setSortBy] = useState('recent');
-  const [viewMode, setViewMode] = useState('grid');
+  const [viewMode, setViewMode] = useState('list');
   const [importAnchor, setImportAnchor] = useState(null);
+
+  // Keep navigation preferences per profile so the vault feels consistent
+  // across unlocks and profile switches.
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(`ciphervault_ui_${currentProfile}`) || '{}');
+      if (saved.filterCategory) setFilterCategory(saved.filterCategory);
+      if (saved.selectedTag) setSelectedTag(saved.selectedTag);
+      if (saved.sortBy) setSortBy(saved.sortBy);
+      if (saved.viewMode) setViewMode(saved.viewMode);
+    } catch {
+      // Ignore malformed preference data and keep safe defaults.
+    }
+  }, [currentProfile]);
+
+  useEffect(() => {
+    if (!currentProfile) return;
+    localStorage.setItem(`ciphervault_ui_${currentProfile}`, JSON.stringify({ filterCategory, selectedTag, sortBy, viewMode }));
+  }, [currentProfile, filterCategory, selectedTag, sortBy, viewMode]);
 
   // Live Camera QR Scanner state
   const [cameraActive, setCameraActive] = useState(false);
@@ -51,8 +73,20 @@ export default function VaultDashboard({
   const streamRef = useRef(null);
   const searchInputRef = useRef(null);
   const clipboardTimerRef = useRef(null);
+  const clipboardOwnerRef = useRef(0);
 
-  useEffect(() => () => clearInterval(clipboardTimerRef.current), []);
+  const clearManagedClipboard = async (owner = clipboardOwnerRef.current) => {
+    if (owner !== clipboardOwnerRef.current) return;
+    clearInterval(clipboardTimerRef.current);
+    clipboardTimerRef.current = null;
+    setClipboardRemaining(0);
+    try { await copyToClipboard(''); } catch (error) { /* Clipboard may be unavailable after navigation. */ }
+  };
+
+  useEffect(() => () => {
+    clearInterval(clipboardTimerRef.current);
+    clipboardOwnerRef.current += 1;
+  }, []);
 
   // Global search shortcut (Ctrl+K or /)
   useEffect(() => {
@@ -82,7 +116,7 @@ export default function VaultDashboard({
 
   const handleToggleFavorite = async (item) => {
     const updated = { ...item, favorite: !item.favorite };
-    await onSaveItem(updated);
+    try { await onSaveItem(updated); } catch (error) { notify(error.message, 'error'); }
   };
 
   const handleRestoreOldPassword = async (itemId, oldPassword) => {
@@ -102,7 +136,7 @@ export default function VaultDashboard({
       passwordUpdatedAt: new Date().toISOString()
     };
 
-    await onSaveItem(updatedItem);
+    try { await onSaveItem(updatedItem); } catch (error) { notify(error.message, 'error'); throw error; }
     setCopiedMsg(`Restored previous password for ${item.name}!`);
   };
 
@@ -117,29 +151,9 @@ export default function VaultDashboard({
     }
 
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(valToCopy);
-      } else {
-        const textarea = document.createElement('textarea');
-        textarea.value = valToCopy;
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-      }
-
-      const timeoutSec = settings?.clipboardTimeout || 30;
-      setCopiedMsg(`Copied [${item.name}]! Auto-clearing in ${timeoutSec}s.`);
-      
-      setTimeout(async () => {
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText('');
-          }
-        } catch (err) {}
-      }, timeoutSec * 1000);
+      await copySecret(valToCopy, item.name, true);
     } catch (err) {
-      alert('Failed to copy to clipboard: ' + err.message);
+      notify('Failed to copy to clipboard: ' + err.message, 'error');
     }
   };
 
@@ -159,12 +173,12 @@ export default function VaultDashboard({
       const timeoutSec = settings?.clipboardTimeout || 30;
       if (clearAfter) {
         clearInterval(clipboardTimerRef.current);
+        const owner = ++clipboardOwnerRef.current;
         setClipboardRemaining(timeoutSec);
         setCopiedMsg(`${label} copied · clears in ${timeoutSec}s`);
         clipboardTimerRef.current = setInterval(() => setClipboardRemaining(value => {
           if (value <= 1) {
-            clearInterval(clipboardTimerRef.current);
-            copyToClipboard('');
+            clearManagedClipboard(owner);
             setCopiedMsg('Clipboard cleared');
             return 0;
           }
@@ -192,110 +206,24 @@ export default function VaultDashboard({
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert('Failed to decrypt and download attachment: ' + err.message);
+      notify('Failed to decrypt and download attachment: ' + err.message, 'error');
     }
   };
 
   // Unified Importer: Handles CipherVault backups, Bitwarden JSON exports, and 2FAS JSON backups
-  const handleVaultJsonImport = (e) => {
-    const file = e.target.files[0];
+  const handleVaultJsonImport = async event => {
+    const file = event.target.files[0]; event.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const data = JSON.parse(event.target.result);
-
-        // 1. Native CipherVault backup
-        if (data.salt && data.vault) {
-          onImportVaultJson(data);
-          return;
-        }
-
-        // 2. Bitwarden Export format
-        if (data.items && Array.isArray(data.items)) {
-          const typeMap = { 1: 'Logins', 2: 'Notes', 3: 'Cards', 4: 'Identities' };
-          const converted = data.items.map(bi => {
-            let totpSecret = '';
-            if (bi.login?.totp) {
-              const parsed = TOTP.parseOtpAuthUrl(bi.login.totp);
-              totpSecret = parsed.secret || bi.login.totp;
-            }
-            return {
-              id: Date.now().toString() + Math.random(),
-              name: bi.name || 'Bitwarden Item',
-              username: bi.login?.username || '',
-              password: bi.login?.password || '',
-              category: typeMap[bi.type] || 'Logins',
-              website: bi.login?.uris?.[0]?.uri || '',
-              favorite: Boolean(bi.favorite),
-              totpSecret: totpSecret,
-              notes: bi.notes || '',
-              tags: [],
-              customFields: [],
-              attachment: null,
-              templateData: {},
-              passwordHistory: [],
-              passwordUpdatedAt: new Date().toISOString()
-            };
-          });
-
-          if (onImportItems) {
-            onImportItems(converted, 'Bitwarden items');
-          } else {
-            converted.forEach(item => onSaveItem(item));
-          }
-          return;
-        }
-
-        // 3. 2FAS Backup format
-        if (data.services && Array.isArray(data.services)) {
-          const accounts = TOTP.parse2FasJson(data);
-          const converted = accounts.map(acc => ({
-            id: Date.now().toString() + Math.random(),
-            name: acc.name,
-            username: acc.username,
-            password: '',
-            category: 'Logins',
-            website: '',
-            favorite: false,
-            tags: ['2FAS'],
-            customFields: [],
-            totpSecret: acc.secret,
-            notes: 'Imported from 2FAS backup',
-            attachment: null,
-            templateData: {},
-            passwordHistory: [],
-            passwordUpdatedAt: new Date().toISOString()
-          }));
-
-          if (onImportItems) {
-            onImportItems(converted, '2FAS accounts');
-          } else {
-            converted.forEach(item => onSaveItem(item));
-          }
-          return;
-        }
-
-        // 4. Raw array of items
-        if (Array.isArray(data)) {
-          if (onImportItems) {
-            onImportItems(data, 'vault items');
-          } else {
-            data.forEach(item => onSaveItem(item));
-          }
-          return;
-        }
-
-        throw new Error('Unrecognized JSON format. Expected CipherVault backup, Bitwarden export, or 2FAS export.');
-      } catch (err) {
-        alert('Import error: ' + err.message);
-      }
-    };
-    reader.readAsText(file);
+    try {
+      const data = JSON.parse(await file.text());
+      if ((data.salt && data.vault) || data.format === 'ciphervault-protected-export') await onImportVaultJson(data);
+      else onImportItems(data);
+    } catch (error) { notify('Import failed: ' + error.message, 'error'); }
   };
 
   const handleAuthImport = async (e) => {
     const file = e.target.files[0];
+    e.target.value = '';
     if (!file) return;
 
     if (file.type.startsWith('image/')) {
@@ -322,21 +250,21 @@ export default function VaultDashboard({
                     return;
                   } else if (qrText.startsWith('otpauth://')) {
                     const parsed = TOTP.parseOtpAuthUrl(qrText);
-                    onImportTotpJson([{ name: parsed.issuer || parsed.account, username: parsed.account, secret: parsed.secret }]);
+                    onImportTotpJson([{ ...parsed, name: parsed.issuer || parsed.account, username: parsed.account, secret: parsed.secret }]);
                     return;
                   }
                 }
               } catch (err) {}
             }
 
-            const manualUrl = prompt('Could not auto-scan QR from screenshot in this browser. Please paste the otpauth:// or otpauth-migration:// URL, or raw secret:');
+            const manualUrl = await input({ title: 'QR could not be read automatically', message: 'Paste an otpauth:// URL, otpauth-migration:// URL, or raw secret.', label: 'QR data' });
             if (manualUrl) {
               if (manualUrl.startsWith('otpauth-migration://')) {
                 const accounts = TOTP.parseGoogleMigrationUrl(manualUrl);
                 onImportTotpJson({ accounts });
               } else if (manualUrl.startsWith('otpauth://')) {
                 const parsed = TOTP.parseOtpAuthUrl(manualUrl);
-                onImportTotpJson([{ name: parsed.issuer || parsed.account, username: parsed.account, secret: parsed.secret }]);
+                onImportTotpJson([{ ...parsed, name: parsed.issuer || parsed.account, username: parsed.account, secret: parsed.secret }]);
               } else {
                 onImportTotpJson([{ name: 'Imported Secret', secret: manualUrl }]);
               }
@@ -346,7 +274,7 @@ export default function VaultDashboard({
         };
         reader.readAsDataURL(file);
       } catch (err) {
-        alert('QR Image processing error: ' + err.message);
+        notify('QR image processing error: ' + err.message, 'error');
       }
       return;
     }
@@ -362,7 +290,7 @@ export default function VaultDashboard({
           onImportTotpJson(data);
         }
       } catch (err) {
-        alert('Failed to parse 2FA file: ' + err.message);
+        notify('Failed to parse 2FA file: ' + err.message, 'error');
       }
     };
     reader.readAsText(file);
@@ -414,7 +342,7 @@ export default function VaultDashboard({
               onImportTotpJson({ accounts });
             } else if (rawVal.startsWith('otpauth://')) {
               const parsed = TOTP.parseOtpAuthUrl(rawVal);
-              onImportTotpJson([{ name: parsed.issuer || parsed.account, username: parsed.account, secret: parsed.secret }]);
+              onImportTotpJson([{ ...parsed, name: parsed.issuer || parsed.account, username: parsed.account, secret: parsed.secret }]);
             } else {
               onImportTotpJson([{ name: 'Scanned 2FA Account', secret: rawVal }]);
             }
@@ -502,6 +430,7 @@ export default function VaultDashboard({
                   <Typography variant="h6" sx={{ fontWeight: 800, fontSize: '1.05rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {item.name}
                   </Typography>
+                  {(item.passwordUpdatedAt || item.createdAt) && <Typography variant="caption" color="text.secondary">Updated {new Date(item.passwordUpdatedAt || item.createdAt).toLocaleDateString()}</Typography>}
                   {item.website && (
                     <Box 
                       component="a" 
@@ -588,7 +517,7 @@ export default function VaultDashboard({
 
             {item.category === 'Passkeys' && item.templateData && (
               <Box sx={{ mb: 2, p: 2, bgcolor: 'rgba(99, 102, 241, 0.08)', borderRadius: 2, border: 1, borderColor: 'primary.main' }}>
-                <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700, display: 'block', mb: .75 }}>🔑 Passkey / WebAuthn credential</Typography>
+                <Typography variant="caption" color="primary.main" sx={{ fontWeight: 700, display: 'block', mb: .75 }}>🔑 Passkey metadata reference</Typography>
                 <Typography variant="body2">{item.templateData.rpId || 'No relying party ID'}</Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: .5 }}>Algorithm: {item.templateData.algorithm || 'Not specified'}</Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis' }}>Credential: {item.templateData.credentialId || 'Not registered'}</Typography>
@@ -682,7 +611,11 @@ export default function VaultDashboard({
                   size="small" 
                   variant="text" 
                   startIcon={isRevealed ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />} 
-                  onClick={() => setShowPasswordMap(prev => ({ ...prev, [item.id]: !prev[item.id] }))} 
+                  onClick={() => {
+                    const nextVisible = !isRevealed;
+                    setShowPasswordMap(prev => ({ ...prev, [item.id]: nextVisible }));
+                    if (nextVisible) setTimeout(() => setShowPasswordMap(prev => ({ ...prev, [item.id]: false })), 15000);
+                  }} 
                   sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
                 >
                   {isRevealed ? 'Hide' : 'Reveal'}
@@ -697,7 +630,7 @@ export default function VaultDashboard({
                 <IconButton size="small" onClick={() => handleOpenEdit(item)} title="Edit" aria-label={`Edit ${item.name}`} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
                   <EditOutlinedIcon fontSize="small" />
                 </IconButton>
-                <IconButton size="small" color="error" onClick={() => onDeleteItem(item.id)} title="Delete" aria-label={`Delete ${item.name}`} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
+                <IconButton size="small" color="error" onClick={() => onDeleteItem(item.id).catch(error => notify(error.message, 'error'))} title="Delete" aria-label={`Delete ${item.name}`} sx={{ border: 1, borderColor: 'divider', borderRadius: 2, p: 1 }}>
                   <DeleteOutlineIcon fontSize="small" />
                 </IconButton>
               </Box>
@@ -717,28 +650,23 @@ export default function VaultDashboard({
   return (
     <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 3 }}>
       {/* Top Action Bar */}
-      <Paper elevation={0} sx={{ p: 3.5, borderRadius: 4, border: 1, borderColor: 'divider', background: (theme) => theme.palette.mode === 'dark' ? 'linear-gradient(135deg, #111827 0%, #1f2937 100%)' : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 2, boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}>
+      <Paper elevation={0} sx={{ p: { xs: 2, sm: 3.5 }, borderRadius: 4, border: 1, borderColor: 'divider', background: (theme) => theme.palette.mode === 'dark' ? 'linear-gradient(135deg, #111827 0%, #1f2937 100%)' : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 2, boxShadow: '0 4px 20px rgba(0,0,0,0.05)' }}>
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.5 }}>Vault Dashboard [{currentProfile}]</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.5 }}>Your vault</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1 }}>
             <span>🛡️ {vaultItems.length} secure item{vaultItems.length === 1 ? '' : 's'} stored locally.</span>
             <Chip size="small" label={`${vaultItems.filter(item => item.favorite).length} favorites`} variant="outlined" />
             <Chip size="small" label={`${vaultItems.filter(item => item.totpSecret).length} with 2FA`} variant="outlined" color="secondary" />
-            {copiedMsg && <Box component="span" sx={{ color: 'secondary.main', fontWeight: 650 }}>{copiedMsg}</Box>}
+            {copiedMsg && <Box component="span" role="status" aria-live="polite" sx={{ color: 'secondary.main', fontWeight: 650 }}>{copiedMsg}</Box>}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-          <Button variant="outlined" component="label" sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, px: 2 }}>
-            📥 Import JSON / Bitwarden / 2FAS
-            <input type="file" hidden accept=".json" onChange={handleVaultJsonImport} />
-          </Button>
-          <Button variant="outlined" component="label" sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, px: 2 }}>
-            📷 Import 2FA
-            <input type="file" hidden accept=".json,image/*" onChange={handleAuthImport} />
-          </Button>
-          <Button variant="outlined" startIcon={<CameraAltIcon />} onClick={startCameraScanner} sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, px: 2 }}>
-            Scan Camera QR
-          </Button>
+          <Button variant="outlined" aria-haspopup="menu" aria-expanded={Boolean(importAnchor)} onClick={event => setImportAnchor(event.currentTarget)}>Import accounts</Button>
+          <Menu anchorEl={importAnchor} open={Boolean(importAnchor)} onClose={() => setImportAnchor(null)}>
+            <MenuItem component="label" onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.querySelector('input').click(); }}>Bitwarden, 2FAS or vault backup<input hidden type="file" accept=".json,.2fas" onChange={e => { handleVaultJsonImport(e); setImportAnchor(null); }} /></MenuItem>
+            <MenuItem component="label" onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.querySelector('input').click(); }}>QR image or authenticator file<input hidden type="file" accept=".json,.2fas,image/*" onChange={e => { handleAuthImport(e); setImportAnchor(null); }} /></MenuItem>
+            <MenuItem onClick={() => { setImportAnchor(null); startCameraScanner(); }}>Scan QR with camera</MenuItem>
+          </Menu>
           <Button variant="contained" size="large" onClick={handleOpenAdd} sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3, background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)' }}>
             + Add Item
           </Button>
@@ -746,7 +674,7 @@ export default function VaultDashboard({
       </Paper>
 
       {/* Category Pills & Search */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'space-between', alignItems: 'center' }}>
+      <Box sx={{ position: 'sticky', top: { xs: 8, sm: 12 }, zIndex: 5, display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'space-between', alignItems: 'center', py: 1.5, px: { xs: 1, sm: 2 }, mx: { xs: -1, sm: -2 }, bgcolor: 'background.default', backdropFilter: 'blur(12px)', borderBottom: 1, borderColor: 'divider' }}>
         <Tabs 
           value={filterCategory} 
           onChange={(e, val) => setFilterCategory(val)} 
@@ -756,6 +684,7 @@ export default function VaultDashboard({
         >
           <Tab label={`All (${vaultItems.length})`} value="All" />
           <Tab label={`Logins (${vaultItems.filter(i => i.category === 'Logins').length})`} value="Logins" />
+          <Tab label={`Identities (${vaultItems.filter(i => i.category === 'Identities').length})`} value="Identities" />
           <Tab label={`Cards (${vaultItems.filter(i => i.category === 'Cards').length})`} value="Cards" />
           <Tab label={`Notes (${vaultItems.filter(i => i.category === 'Notes').length})`} value="Notes" />
           <Tab label={`API Keys (${vaultItems.filter(i => i.category === 'ApiKeys').length})`} value="ApiKeys" />
@@ -765,17 +694,22 @@ export default function VaultDashboard({
           <Tab label={`Wifi (${vaultItems.filter(i => i.category === 'Wifi').length})`} value="Wifi" />
         </Tabs>
 
-        <Box sx={{ display: 'flex', gap: 1, width: { xs: '100%', sm: 'auto' }, alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, width: '100%', alignItems: 'center' }}>
         <TextField
           inputRef={searchInputRef}
           size="small"
-          placeholder="Search (Ctrl+K or /)..."
+          label="Search vault"
+          placeholder="Name, username or website"
+          inputProps={{ 'aria-label': 'Search vault' }}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           InputProps={{
             startAdornment: (
               <SearchIcon fontSize="small" color="action" sx={{ mr: 1 }} />
             ),
+            endAdornment: searchQuery ? (
+              <IconButton size="small" aria-label="Clear vault search" onClick={() => setSearchQuery('')} edge="end"><ClearIcon fontSize="small" /></IconButton>
+            ) : undefined,
           }}
           sx={{ flex: 1, minWidth: 0, width: { xs: 'auto', sm: '280px' }, '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
         />
@@ -882,13 +816,14 @@ export default function VaultDashboard({
       <ItemModal
         open={openModal}
         onClose={() => setOpenModal(false)}
-        onSave={(item) => {
-          onSaveItem(item);
+        onSave={async (item) => {
+          await onSaveItem(item);
           setOpenModal(false);
         }}
         editingItem={editingItem}
         activeKey={activeKey}
         settings={settings}
+        authenticatorItems={authenticatorItems}
       />
 
       {historyItem && (

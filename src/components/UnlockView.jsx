@@ -1,25 +1,27 @@
-import React, { useState, useEffect } from 'react';
-import { Paper, Typography, TextField, Button, Box, Alert, IconButton, ButtonGroup } from '@mui/material';
+import { unlockWithDevice } from '../utils/deviceUnlock';
+import { vaultStorage, validateVault } from '../utils/storage';
+import { pinSession } from '../utils/pinSession';
+import React, { useState, useEffect, useRef } from 'react';
+import { Paper, Typography, TextField, Button, Box, Alert } from '@mui/material';
 import { CryptoEngine } from '../utils/crypto';
-import QuickTotpModal from './QuickTotpModal';
-import LockOpenIcon from '@mui/icons-material/LockOpen';
-import PinIcon from '@mui/icons-material/Dialpad';
 
-export default function UnlockView({ profileName, onUnlockSuccess, onSwitchToSetup, onOpenAuthenticatorOnly, profiles = ['Default'] }) {
+export default function UnlockView({ profileName, onUnlockSuccess, onSwitchToSetup }) {
+  const generation = useRef(0);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => () => { generation.current++; }, [profileName]);
   const [password, setPassword] = useState('');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [hint, setHint] = useState('');
-  const [openQuickTotp, setOpenQuickTotp] = useState(false);
+  const [authenticator, setAuthenticator] = useState(false);
   const [unlockMode, setUnlockMode] = useState('password'); // 'password' | 'pin'
   const [hasPinConfigured, setHasPinConfigured] = useState(false);
 
   useEffect(() => {
-    const pfx = profileName === 'Default' ? '' : `_${profileName}`;
-    const savedHint = localStorage.getItem(`ciphervault_hint${pfx}`);
-    if (savedHint) setHint(savedHint);
+    const savedHint = vaultStorage.get(profileName)?.hint;
+    setHint(savedHint || '');
 
-    const isPin = localStorage.getItem(`ciphervault_pin_enabled${pfx}`) === 'true';
+    const isPin = pinSession.has(profileName);
     setHasPinConfigured(isPin);
     if (isPin) {
       setUnlockMode('pin');
@@ -33,11 +35,14 @@ export default function UnlockView({ profileName, onUnlockSuccess, onSwitchToSet
 
   const handleMasterPasswordUnlock = async (e) => {
     e.preventDefault();
+    if (busy) return;
+    const attempt = ++generation.current;
+    setBusy(true);
     setError('');
     try {
-      const pfx = profileName === 'Default' ? '' : `_${profileName}`;
-      const savedSalt = localStorage.getItem(`ciphervault_salt${pfx}`);
-      const savedCipher = localStorage.getItem(`ciphervault_vault${pfx}`);
+      const record = vaultStorage.get(profileName);
+        const savedSalt = record?.salt;
+      const savedCipher = JSON.stringify(record?.vault);
 
       if (!savedSalt || !savedCipher) {
         onSwitchToSetup();
@@ -46,38 +51,46 @@ export default function UnlockView({ profileName, onUnlockSuccess, onSwitchToSet
 
       const derivedKey = await CryptoEngine.deriveMasterKey(password, savedSalt);
       const decryptedStr = await CryptoEngine.decryptPayload(derivedKey, JSON.parse(savedCipher));
-      const parsed = JSON.parse(decryptedStr);
+      const parsed = validateVault(JSON.parse(decryptedStr));
 
-      onUnlockSuccess(derivedKey, parsed.items || [], parsed.trash || []);
+      if (attempt === generation.current) onUnlockSuccess(derivedKey, parsed.items, parsed.trash, record.revision, authenticator);
     } catch (err) {
+      if (attempt !== generation.current) return;
       setError('Incorrect master password. Please try again.');
-    }
+    } finally { if (attempt === generation.current) setBusy(false); }
   };
 
   const handlePinUnlock = async (e) => {
     e.preventDefault();
+    if (busy) return;
+    const attempt = ++generation.current;
+    setBusy(true);
     setError('');
     try {
-      const pfx = profileName === 'Default' ? '' : `_${profileName}`;
-      const pinSalt = localStorage.getItem(`ciphervault_pin_salt${pfx}`);
-      const wrappedStr = localStorage.getItem(`ciphervault_pin_wrapped${pfx}`);
-      const savedCipher = localStorage.getItem(`ciphervault_vault${pfx}`);
-
-      if (!pinSalt || !wrappedStr || !savedCipher) {
-        setUnlockMode('password');
-        setError('PIN configuration missing. Please use master password.');
-        return;
-      }
-
-      const wrapped = JSON.parse(wrappedStr);
-      const unwrappedKey = await CryptoEngine.unwrapMasterKeyWithPin(wrapped, pin, pinSalt);
+      const record = vaultStorage.get(profileName);
+        const savedCipher = JSON.stringify(record?.vault);
+      const unwrappedKey = await pinSession.unlock(profileName, pin);
       const decryptedStr = await CryptoEngine.decryptPayload(unwrappedKey, JSON.parse(savedCipher));
-      const parsed = JSON.parse(decryptedStr);
+      const parsed = validateVault(JSON.parse(decryptedStr));
 
-      onUnlockSuccess(unwrappedKey, parsed.items || [], parsed.trash || []);
+      if (attempt === generation.current) onUnlockSuccess(unwrappedKey, parsed.items, parsed.trash, record.revision, authenticator);
     } catch (err) {
-      setError('Incorrect PIN. Please try again or use your master password.');
-    }
+      if (attempt !== generation.current) return;
+      if (!pinSession.has(profileName)) { setHasPinConfigured(false); setUnlockMode('password'); }
+      setError('Incorrect PIN or expired session. Use your master password after five failed attempts.');
+    } finally { if (attempt === generation.current) setBusy(false); }
+  };
+
+  const handleDeviceUnlock = async () => {
+    if (busy) return;
+    const attempt = ++generation.current; setBusy(true); setError('');
+    try {
+      const record = vaultStorage.get(profileName);
+      const key = await unlockWithDevice(record.deviceUnlock);
+      const payload = validateVault(JSON.parse(await CryptoEngine.decryptPayload(key, record.vault)));
+      if (attempt === generation.current) onUnlockSuccess(key, payload.items, payload.trash, record.revision, authenticator);
+    } catch (error) { if (attempt === generation.current) setError('Device unlock failed: ' + error.message); }
+    finally { if (attempt === generation.current) setBusy(false); }
   };
 
   return (
@@ -110,6 +123,7 @@ export default function UnlockView({ profileName, onUnlockSuccess, onSwitchToSet
         </Box>
 
         {error && <Alert severity="error">{error}</Alert>}
+        {vaultStorage.get(profileName)?.deviceUnlock && <Button variant="outlined" disabled={busy} onClick={handleDeviceUnlock}>Unlock with device</Button>}
 
         {/* PIN Unlock Form */}
         {unlockMode === 'pin' ? (
@@ -130,7 +144,7 @@ export default function UnlockView({ profileName, onUnlockSuccess, onSwitchToSet
             />
 
             <Button 
-              type="submit" 
+              type="submit" disabled={busy} 
               variant="contained" 
               size="large" 
               sx={{ 
@@ -179,7 +193,7 @@ export default function UnlockView({ profileName, onUnlockSuccess, onSwitchToSet
             )}
 
             <Button 
-              type="submit" 
+              type="submit" disabled={busy} 
               variant="contained" 
               size="large" 
               sx={{ 
@@ -212,36 +226,17 @@ export default function UnlockView({ profileName, onUnlockSuccess, onSwitchToSet
         )}
 
         <Box sx={{ textAlign: 'center', pt: 1, borderTop: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <Box sx={{ display: 'flex', gap: 1 }}>
-            <Button 
-              fullWidth 
-              variant="outlined" 
-              onClick={() => setOpenQuickTotp(true)} 
-              sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2.5 }}
-            >
-              ⚡ Quick 2FA View
-            </Button>
-            <Button 
-              fullWidth 
-              variant="outlined" 
-              onClick={onOpenAuthenticatorOnly} 
-              sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2.5, borderColor: 'secondary.main', color: 'secondary.main', '&:hover': { borderColor: 'secondary.dark', bgcolor: 'rgba(16, 185, 129, 0.04)' } }}
-            >
-              📲 Standalone 2FA
-            </Button>
-          </Box>
+          <Button variant="outlined" onClick={() => { setAuthenticator(value => !value); setError(''); }}>
+            {authenticator ? 'Open full vault after unlock' : 'Open 2FA authenticator after unlock'}
+          </Button>
+          {authenticator && <Typography variant="caption">Unlock above to access your encrypted 2FA accounts.</Typography>}
 
           <Button variant="text" size="small" onClick={onSwitchToSetup} sx={{ textTransform: 'none', fontWeight: 600 }}>
-            Reset or Create New Vault
+            Create or Replace Vault
           </Button>
         </Box>
       </Paper>
 
-      <QuickTotpModal
-        open={openQuickTotp}
-        onClose={() => setOpenQuickTotp(false)}
-        profiles={profiles}
-      />
     </Box>
   );
 }

@@ -5,8 +5,10 @@ import QrCodeIcon from '@mui/icons-material/QrCode';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import { TOTP } from '../utils/totp';
 import { QRCodeEncoder } from '../utils/qrcode';
+import { useFeedback } from './FeedbackProvider';
 
 export default function TOTPWidget({ secret, name = 'Account', issuer = '', settings }) {
+  const { notify } = useFeedback();
   const [code, setCode] = useState('------');
   const [nextCode, setNextCode] = useState('------');
   const [timeLeft, setTimeLeft] = useState(30);
@@ -65,14 +67,14 @@ export default function TOTPWidget({ secret, name = 'Account', issuer = '', sett
     const rawSecret = parsedConfig.secret || secret;
     const otpUrl = secret.startsWith('otpauth://') 
       ? secret 
-      : TOTP.buildOtpAuthUrl({ issuer, name, secret: rawSecret, period: period });
+      : TOTP.buildOtpAuthUrl({ issuer, name, secret: rawSecret, period: period, digits: parsedConfig.digits, algorithm: parsedConfig.algorithm });
     
     try {
       const svg = QRCodeEncoder.renderSvg(otpUrl, { size: 240, margin: 2, color: '#090d16', bgColor: '#ffffff' });
       setQrSvg(svg);
       setOpenQr(true);
     } catch (err) {
-      alert('Failed to generate QR code: ' + err.message);
+      notify('Failed to generate QR code: ' + err.message, 'error');
     }
   };
 
@@ -228,7 +230,7 @@ export default function TOTPWidget({ secret, name = 'Account', issuer = '', sett
         <DialogTitle sx={{ fontWeight: 800, fontSize: '1.15rem' }}>📲 2FA QR Code Pairing</DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-            Scan with the <strong>2FAS</strong> mobile app, Google Authenticator, or Bitwarden to sync this 2FA account.
+            Scan with the <strong>2FAS</strong> mobile app, Google Authenticator, or Bitwarden to copy this authenticator secret to that app. This does not establish ongoing device synchronization.
           </Typography>
 
           <Box 
@@ -256,7 +258,7 @@ export default function TOTPWidget({ secret, name = 'Account', issuer = '', sett
             size="small"
             onClick={() => {
               navigator.clipboard.writeText(parsedConfig.secret || secret);
-              alert('2FA secret copied to clipboard!');
+              notify('2FA secret copied to clipboard!', 'success');
             }}
             sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
           >

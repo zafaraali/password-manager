@@ -15,6 +15,8 @@ import LabelIcon from '@mui/icons-material/Label';
 import KeyIcon from '@mui/icons-material/Key';
 import { CryptoEngine } from '../utils/crypto';
 import { TOTP } from '../utils/totp';
+import { useFeedback } from './FeedbackProvider';
+import { assertPasskey, isWebAuthnSupported, registerPasskey } from '../utils/webauthn';
 
 const DICEWARE_WORDLIST = [
   'galaxy', 'falcon', 'orbit', 'matrix', 'crypto', 'shield', 'quantum', 'shadow', 
@@ -27,7 +29,8 @@ const DICEWARE_WORDLIST = [
 
 const PRESET_TAGS = ['Work', 'Personal', 'Finance', 'Crypto', 'Social', 'Shopping', 'Server'];
 
-export default function ItemModal({ open, onClose, onSave, editingItem, activeKey, settings }) {
+export default function ItemModal({ open, onClose, onSave, editingItem, activeKey, settings, authenticatorItems = [] }) {
+  const { notify } = useFeedback();
   const [formName, setFormName] = useState('');
   const [formUsername, setFormUsername] = useState('');
   const [formPassword, setFormPassword] = useState('');
@@ -39,6 +42,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
   const [customFields, setCustomFields] = useState([]);
   const [formNotes, setFormNotes] = useState('');
   const [formTotp, setFormTotp] = useState('');
+  const [totpId, setTotpId] = useState('');
   const [formAttachment, setFormAttachment] = useState(null);
 
   const [templateData, setTemplateData] = useState({});
@@ -52,11 +56,10 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
   // Real-time inline HIBP breach check state
   const [inlinePwnedCount, setInlinePwnedCount] = useState(null);
   const [checkingInlinePwned, setCheckingInlinePwned] = useState(false);
-  const [passkeyStatus, setPasskeyStatus] = useState('');
   const [itemStep, setItemStep] = useState(0);
   const [formError, setFormError] = useState('');
-
-  const toBase64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+  const [saving, setSaving] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
 
   useEffect(() => {
     if (editingItem) {
@@ -70,6 +73,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
       setCustomFields(Array.isArray(editingItem.customFields) ? editingItem.customFields : []);
       setFormNotes(editingItem.notes || '');
       setFormTotp(editingItem.totpSecret || '');
+      setTotpId(editingItem.totpId || '');
       setFormAttachment(editingItem.attachment || null);
       setTemplateData(editingItem.templateData || {});
     } else {
@@ -83,6 +87,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
       setCustomFields([]);
       setFormNotes('');
       setFormTotp('');
+      setTotpId('');
       setFormAttachment(null);
       setTemplateData({});
     }
@@ -93,60 +98,34 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
     setShowKey(false);
     setShowPassphrase(false);
     setInlinePwnedCount(null);
-    setPasskeyStatus('');
     setItemStep(0);
     setFormError('');
   }, [editingItem, open]);
-
-  const registerPasskey = async () => {
-    if (!window.PublicKeyCredential) {
-      setPasskeyStatus('This browser does not support WebAuthn.');
-      return;
-    }
-    try {
-      let websiteHost = window.location.hostname;
-      if (formWebsite) {
-        try { websiteHost = new URL(formWebsite.includes('://') ? formWebsite : `https://${formWebsite}`).hostname; } catch (e) {}
-      }
-      const rpId = templateData.rpId || websiteHost;
-      const credential = await navigator.credentials.create({ publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rp: { name: 'CipherVault', id: rpId },
-        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: formUsername || 'vault-user', displayName: formUsername || formName },
-        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }, { type: 'public-key', alg: -8 }],
-        authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
-        timeout: 60000,
-        attestation: 'none'
-      }});
-      if (!credential) throw new Error('No credential was returned.');
-      const response = credential.response;
-      setTemplateData(prev => ({ ...prev, rpId, credentialId: toBase64(credential.rawId), publicKey: toBase64(response.attestationObject || response.clientDataJSON), algorithm: 'WebAuthn (ES256 / RS256 / Ed25519)' }));
-      setPasskeyStatus('Passkey registered in this browser. Save the item to keep its metadata.');
-    } catch (error) {
-      setPasskeyStatus(error.name === 'NotAllowedError' ? 'Passkey registration was cancelled.' : `Passkey registration failed: ${error.message}`);
-    }
-  };
 
   // Real-time inline breach check with debouncing
   useEffect(() => {
     if (!formPassword || formPassword.length < 6 || formCategory === 'Crypto' || formCategory === 'SSH' || formCategory === 'Passkeys') {
       setInlinePwnedCount(null);
+      setCheckingInlinePwned(false);
       return;
     }
 
+    let cancelled = false;
+    setInlinePwnedCount(null);
+    setCheckingInlinePwned(true);
     const timer = setTimeout(async () => {
       setCheckingInlinePwned(true);
       try {
         const count = await CryptoEngine.checkPwnedPassword(formPassword);
-        setInlinePwnedCount(count);
+        if (!cancelled) setInlinePwnedCount(count);
       } catch (e) {
-        setInlinePwnedCount(null);
+        if (!cancelled) setInlinePwnedCount(null);
       } finally {
-        setCheckingInlinePwned(false);
+        if (!cancelled) setCheckingInlinePwned(false);
       }
     }, 450);
 
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [formPassword, formCategory]);
 
   const handleCategoryChange = (newCat) => {
@@ -249,7 +228,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      alert('File size exceeds 5MB limit for local vault storage.');
+      notify('File size exceeds the 5MB limit for local vault storage.', 'warning');
       return;
     }
 
@@ -267,12 +246,29 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
     }
   };
 
+  const handleRegisterPasskey = async () => {
+    setPasskeyBusy(true);
+    try {
+      const metadata = await registerPasskey({ userName: formUsername, displayName: formName, rpId: location.hostname });
+      setTemplateData(previous => ({ ...previous, ...metadata, algorithm: 'ES256 / WebAuthn' }));
+      notify('Passkey registered on this device. The private key stays in your authenticator.', 'success');
+    } catch (error) { notify(error.message, 'error'); }
+    finally { setPasskeyBusy(false); }
+  };
+
+  const handleTestPasskey = async () => {
+    setPasskeyBusy(true);
+    try { await assertPasskey(templateData.credentialId, templateData.rpId || location.hostname); notify('Passkey assertion succeeded.', 'success'); }
+    catch (error) { notify(error.message, 'error'); }
+    finally { setPasskeyBusy(false); }
+  };
+
   const handleTotpChange = (e) => {
     const val = e.target.value.trim();
     if (val.startsWith('otpauth://')) {
       const parsed = TOTP.parseOtpAuthUrl(val);
       if (parsed.secret) {
-        setFormTotp(parsed.secret);
+        setFormTotp(val);
         if (!formName && parsed.issuer) setFormName(parsed.issuer);
         if (!formUsername && parsed.account) setFormUsername(parsed.account);
         return;
@@ -281,8 +277,9 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
     setFormTotp(val);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving) return;
     if (!formName.trim()) {
       setFormError('Enter an item name before saving.');
       setItemStep(0);
@@ -310,8 +307,9 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
       if (updatedHistory.length > 5) updatedHistory.pop();
     }
 
-    onSave({
-      id: editingItem ? editingItem.id : Date.now().toString(),
+    setSaving(true);
+    try { await onSave({
+      id: editingItem ? editingItem.id : crypto.randomUUID(),
       name: formName,
       username: formUsername,
       password: formPassword,
@@ -322,12 +320,13 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
       customFields: customFields.filter(cf => cf.name.trim() || cf.value.trim()),
       notes: formNotes,
       totpSecret: formTotp,
+      totpId: totpId || undefined,
       attachment: formAttachment,
       templateData: templateData,
       passwordHistory: updatedHistory,
       passwordUpdatedAt: passwordChanged || !editingItem ? new Date().toISOString() : (editingItem.passwordUpdatedAt || new Date().toISOString()),
       createdAt: editingItem?.createdAt || new Date().toISOString()
-    });
+    }); } catch (error) { setFormError(error.message); } finally { setSaving(false); }
   };
 
   return (
@@ -370,7 +369,8 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
               sx={{ borderRadius: 3 }}
             >
               <MenuItem value="Logins">🔐 Login / Password</MenuItem>
-              <MenuItem value="Passkeys">🔑 Passkey (FIDO2 / WebAuthn)</MenuItem>
+              <MenuItem value="Passkeys">🔑 Passkey metadata</MenuItem>
+              <MenuItem value="Identities">Identity</MenuItem>
               <MenuItem value="Cards">💳 Credit / Debit Card</MenuItem>
               <MenuItem value="Notes">📝 Secure Note</MenuItem>
               <MenuItem value="ApiKeys">🔑 API Key / Token</MenuItem>
@@ -448,7 +448,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
           {formCategory === 'Passkeys' && (
             <Box sx={{ p: 2.5, border: 1, borderColor: 'primary.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
-                <KeyIcon fontSize="small" /> Passkey (FIDO2 / WebAuthn) Template
+                <KeyIcon fontSize="small" /> Passkey metadata reference
               </Typography>
               <TextField
                 label="Relying Party ID (Domain)"
@@ -491,8 +491,12 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 placeholder="Base64-encoded credential public key"
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
-              <Button variant="contained" onClick={registerPasskey} sx={{ alignSelf: 'flex-start', textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff' }}>Register passkey on this device</Button>
-              {passkeyStatus && <Typography variant="caption" color={passkeyStatus.includes('failed') || passkeyStatus.includes('cancelled') || passkeyStatus.includes('does not') ? 'error.main' : 'success.main'}>{passkeyStatus}</Typography>}
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Button variant="contained" disabled={passkeyBusy || !isWebAuthnSupported()} onClick={handleRegisterPasskey} sx={{ textTransform: 'none' }}>{passkeyBusy ? 'Waiting for authenticator…' : 'Register passkey on this device'}</Button>
+                <Button variant="outlined" disabled={passkeyBusy || !templateData.credentialId} onClick={handleTestPasskey} sx={{ textTransform: 'none' }}>Test passkey</Button>
+              </Box>
+              {!isWebAuthnSupported() && <Alert severity="warning">Passkeys require a supported browser over HTTPS or localhost. This vault stores public credential metadata; the private key remains in the platform authenticator.</Alert>}
+              <Alert severity="info">Registered credentials stay in the device authenticator. CipherVault stores only the credential ID and relying-party metadata, and cannot recover a lost passkey.</Alert>
             </Box>
           )}
 
@@ -707,8 +711,13 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             </Box>
           )}
 
+          <TextField select label="Linked authenticator account" value={totpId} onChange={e => { setTotpId(e.target.value); setFormTotp(authenticatorItems.find(item => item.id === e.target.value)?.totpSecret || ''); }} helperText="Link an existing token, or choose New / none to add a token or remove the link.">
+            <MenuItem value="">New / none</MenuItem>{authenticatorItems.map(item => <MenuItem key={item.id} value={item.id}>{item.name} — {item.username || ''}</MenuItem>)}
+          </TextField>
           <TextField
             label="TOTP Secret Key or otpauth:// link (for 2FA)"
+            disabled={Boolean(totpId)}
+            helperText={totpId ? 'Edit the shared secret in the Authenticator tab.' : 'A new secret creates a separate authenticator account linked to this login.'}
             fullWidth
             type={showTotp ? 'text' : 'password'}
             value={formTotp}
@@ -821,7 +830,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
         {itemStep === 0 ? (
           <Button onClick={() => { if (!formName.trim()) { setFormError('Enter an item name to continue.'); return; } setFormError(''); setItemStep(1); }} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Continue</Button>
         ) : (
-          <Button onClick={handleSubmit} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Save Item</Button>
+          <Button onClick={handleSubmit} disabled={saving} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>{saving ? 'Saving…' : 'Save Item'}</Button>
         )}
       </DialogActions>
     </Dialog>
