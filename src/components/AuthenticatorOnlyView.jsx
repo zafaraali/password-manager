@@ -4,53 +4,48 @@ import TOTPWidget from './TOTPWidget';
 import { TOTP } from '../utils/totp';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import { useFeedback } from './FeedbackProvider';
 
-export default function AuthenticatorOnlyView({ onBackToLogin, settings }) {
-  const [authItems, setAuthItems] = useState([]);
+export default function AuthenticatorOnlyView({ onBackToLogin, settings, vaultItems, onSaveItem, onDeleteItem }) {
+  const { confirm, notify } = useFeedback();
+  const authItems = vaultItems.filter(item => item.totpSecret).map(item => ({ ...item, secret: item.totpSecret }));
   const [searchQuery, setSearchQuery] = useState('');
   const [openAdd, setOpenAdd] = useState(false);
   const [newName, setNewName] = useState('');
   const [newSecret, setNewSecret] = useState('');
   const [copiedMsg, setCopiedMsg] = useState('');
 
-  useEffect(() => {
-    const saved = localStorage.getItem('ciphervault_standalone_2fa');
-    if (saved) {
-      try {
-        setAuthItems(JSON.parse(saved));
-      } catch (e) {}
-    } else {
-      // Default sample 2FA if empty
-      const initial = [
-        { id: '1', name: 'Google (sample@gmail.com)', secret: 'JBSWY3DPEHPK3PXP' },
-        { id: '2', name: 'GitHub (developer)', secret: 'GEZDGNBVGY3TQOJQ' }
-      ];
-      setAuthItems(initial);
-      localStorage.setItem('ciphervault_standalone_2fa', JSON.stringify(initial));
+  const handleSecretChange = (e) => {
+    const val = e.target.value.trim();
+    if (val.startsWith('otpauth://')) {
+      const parsed = TOTP.parseOtpAuthUrl(val);
+      if (parsed.secret) {
+        setNewSecret(parsed.secret);
+        if (!newName && (parsed.issuer || parsed.account)) {
+          setNewName(parsed.issuer ? `${parsed.issuer} (${parsed.account})` : parsed.account);
+        }
+        return;
+      }
     }
-  }, []);
-
-  const saveAuthItems = (updated) => {
-    setAuthItems(updated);
-    localStorage.setItem('ciphervault_standalone_2fa', JSON.stringify(updated));
+    setNewSecret(val);
   };
 
-  const handleAddItem = (e) => {
+  const handleAddItem = async (e) => {
     e.preventDefault();
     if (!newName || !newSecret) return;
     const cleanSecret = newSecret.replace(/\s+/g, '').toUpperCase();
-    const updated = [...authItems, { id: Date.now().toString(), name: newName, secret: cleanSecret }];
-    saveAuthItems(updated);
+    try {
+      await onSaveItem({ id: crypto.randomUUID(), name: newName, totpSecret: cleanSecret, category: 'Logins' });
+    } catch (error) { notify(error.message, 'error'); return; }
     setNewName('');
     setNewSecret('');
     setOpenAdd(false);
     setCopiedMsg('2FA account added successfully!');
   };
 
-  const handleDelete = (id) => {
-    if (confirm('Are you sure you want to remove this 2FA account?')) {
-      const updated = authItems.filter(i => i.id !== id);
-      saveAuthItems(updated);
+  const handleDelete = async (id) => {
+    if (await confirm({ title: 'Remove authenticator account?', message: 'This removes the account from the standalone authenticator.', confirmLabel: 'Remove', severity: 'error' })) {
+      try { await onDeleteItem(id); } catch (error) { notify(error.message, 'error'); return; }
       setCopiedMsg('2FA account removed.');
     }
   };
@@ -61,7 +56,7 @@ export default function AuthenticatorOnlyView({ onBackToLogin, settings }) {
       setCopiedMsg(`Copied 2FA code for [${name}]!`);
       setTimeout(() => setCopiedMsg(''), 3000);
     } catch (e) {
-      alert('Failed to copy code: ' + e.message);
+      notify('Failed to copy code: ' + e.message, 'error');
     }
   };
 
@@ -71,9 +66,9 @@ export default function AuthenticatorOnlyView({ onBackToLogin, settings }) {
     <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 3 }}>
       <Paper elevation={0} sx={{ p: 3.5, borderRadius: 4, border: 1, borderColor: 'divider', background: (theme) => theme.palette.mode === 'dark' ? 'linear-gradient(135deg, #111827 0%, #1f2937 100%)' : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.5 }}>📲 Standalone 2FA Authenticator</Typography>
+          <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.5 }}>📲 Encrypted 2FA Authenticator</Typography>
           <Typography variant="body2" color="text.secondary">
-            {authItems.length} authenticator account{authItems.length === 1 ? '' : 's'} loaded without master password. {copiedMsg && <Box component="span" sx={{ color: 'secondary.main', fontWeight: 600, ml: 1 }}>{copiedMsg}</Box>}
+            {authItems.length} authenticator account{authItems.length === 1 ? '' : 's'} encrypted in your unlocked vault. {copiedMsg && <Box component="span" sx={{ color: 'secondary.main', fontWeight: 600, ml: 1 }}>{copiedMsg}</Box>}
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
@@ -98,12 +93,12 @@ export default function AuthenticatorOnlyView({ onBackToLogin, settings }) {
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
           <TextField
-            label="TOTP Secret Key (Base32)"
+            label="TOTP Secret Key or otpauth:// link"
             required
             fullWidth
             value={newSecret}
-            onChange={(e) => setNewSecret(e.target.value)}
-            placeholder="JBSWY3DPEHPK3PXP"
+            onChange={handleSecretChange}
+            placeholder="JBSWY3DPEHPK3PXP or otpauth://totp/..."
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>

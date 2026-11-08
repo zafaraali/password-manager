@@ -1,21 +1,55 @@
-import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, FormControlLabel, Switch, Slider, TextField, Divider, Alert } from '@mui/material';
-import { CryptoEngine } from '../utils/crypto';
+import DeviceUnlockSettings from './DeviceUnlockSettings';
+import { pinSession } from '../utils/pinSession';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, 
+  FormControlLabel, Switch, Slider, TextField, Divider, Alert, Tabs, Tab
+} from '@mui/material';
+import { TOTP } from '../utils/totp';
 
-export default function SettingsModal({ open, onClose, settings, onSaveSettings, currentProfile, onDeleteProfile }) {
+export default function SettingsModal({ open, onClose, settings, onSaveSettings, currentProfile, onDeleteProfile, activeKey, deviceEnabled, onEnableDevice, onDisableDevice }) {
+  const active = useRef(true);
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const [localSettings, setLocalSettings] = useState(settings);
   const [originalAccent, setOriginalAccent] = useState(settings.accentColor);
-  const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
+
+  // PIN Unlock state
+  const [pinEnabled, setPinEnabled] = useState(false);
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [pinMsg, setPinMsg] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [clockSync, setClockSync] = useState({ status: '', loading: false });
+  const [settingsTab, setSettingsTab] = useState('appearance');
 
   useEffect(() => {
     if (open) {
       setLocalSettings(settings);
       setOriginalAccent(settings.accentColor);
-      setDeletePassword('');
       setDeleteError('');
+      setNewPin('');
+      setConfirmPin('');
+      setPinMsg('');
+      setPinError('');
+      setClockSync({ status: '', loading: false });
+      setSettingsTab('appearance');
+      const isPin = pinSession.has(currentProfile);
+      setPinEnabled(isPin);
     }
-  }, [settings, open]);
+  }, [settings, open, currentProfile]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const sections = ['appearance', 'authenticator', 'generator', 'security', 'danger']
+      .map(id => document.getElementById(id)).filter(Boolean);
+    const observer = new IntersectionObserver(entries => {
+      const visible = entries.filter(entry => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+      if (visible) setSettingsTab(visible.target.id);
+    }, { root: document.querySelector('[role="dialog"]'), threshold: [0.2, 0.6] });
+    sections.forEach(section => observer.observe(section));
+    return () => observer.disconnect();
+  }, [open]);
 
   const handleChange = (key, value) => {
     setLocalSettings(prev => {
@@ -25,6 +59,12 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
       }
       return updated;
     });
+  };
+
+  const handleClockSync = async () => {
+    setClockSync({ status: 'Checking UTC time…', loading: true });
+    const offset = await TOTP.syncClockDrift();
+    setClockSync({ status: offset === null ? 'Unable to reach UTC time service. Try again when online.' : `System clock is ${Math.abs(offset) <= 1 ? 'accurate' : 'adjusted'} (offset: ${offset}s)`, loading: false });
   };
 
   const handleColorSelect = (colorValue) => {
@@ -47,36 +87,53 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
     onClose();
   };
 
-  const handleDeleteVaultSubmit = async (e) => {
+  const handleEnablePin = async (e) => {
     e.preventDefault();
-    setDeleteError('');
-    if (!deletePassword) {
-      setDeleteError('Please enter your master password to confirm deletion.');
+    setPinError('');
+    setPinMsg('');
+
+    if (!newPin || newPin.length < 4 || newPin.length > 8) {
+      setPinError('PIN must be between 4 and 8 digits.');
+      return;
+    }
+    if (newPin !== confirmPin) {
+      setPinError('PINs do not match.');
+      return;
+    }
+    if (!/^\d+$/.test(newPin)) {
+      setPinError('PIN must contain only numbers (0-9).');
+      return;
+    }
+    if (!activeKey) {
+      setPinError('Vault master key is unavailable. Please unlock vault first.');
       return;
     }
 
     try {
-      const pfx = currentProfile === 'Default' ? '' : `_${currentProfile}`;
-      const savedSalt = localStorage.getItem(`ciphervault_salt${pfx}`);
-      const savedCipher = localStorage.getItem(`ciphervault_vault${pfx}`);
+      await pinSession.enable(currentProfile, activeKey, newPin, () => active.current);
+      if (!active.current) return;
 
-      if (!savedSalt || !savedCipher) {
-        // If no vault data, just delete
-        onClose();
-        onDeleteProfile(currentProfile);
-        return;
-      }
-
-      // Verify master password by deriving key and decrypting payload
-      const derivedKey = await CryptoEngine.deriveMasterKey(deletePassword, savedSalt);
-      await CryptoEngine.decryptPayload(derivedKey, JSON.parse(savedCipher));
-
-      // Password verified successfully! Proceed to delete
-      onClose();
-      onDeleteProfile(currentProfile);
+      setPinEnabled(true);
+      setNewPin('');
+      setConfirmPin('');
+      setPinMsg('Quick PIN unlock enabled successfully!');
     } catch (err) {
-      setDeleteError('Incorrect master password. Vault deletion aborted.');
+      setPinError('Failed to enable PIN: ' + err.message);
     }
+  };
+
+  const handleDisablePin = () => {
+    pinSession.clear(currentProfile);
+    setPinEnabled(false);
+    setPinMsg('PIN unlock disabled.');
+  };
+
+  const handleDeleteVaultSubmit = async (e) => {
+    e.preventDefault();
+    setDeleteError('');
+
+    onClose();
+    await onDeleteProfile(currentProfile);
   };
 
   const colorThemes = [
@@ -89,13 +146,20 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
   ];
 
   return (
-    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: { xs: 0, sm: 4 }, p: 1, m: { xs: 0, sm: 2 }, maxHeight: { xs: '100%', sm: 'calc(100% - 64px)' } } }}>
       <DialogTitle sx={{ fontWeight: 800, fontSize: '1.25rem' }}>⚙️ Vault Preferences & Settings</DialogTitle>
       <DialogContent dividers>
+        <Tabs value={settingsTab} onChange={(e, value) => { setSettingsTab(value); document.getElementById(value)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} variant="scrollable" scrollButtons="auto" sx={{ position: 'sticky', top: -24, zIndex: 2, bgcolor: 'background.paper', mb: 2, borderBottom: 1, borderColor: 'divider', '& .MuiTab-root': { textTransform: 'none', fontWeight: 700, minHeight: 44 } }}>
+          <Tab label="Appearance" value="appearance" />
+          <Tab label="Authenticator" value="authenticator" />
+          <Tab label="Generator" value="generator" />
+          <Tab label="Security" value="security" />
+          <Tab label="Danger zone" value="danger" />
+        </Tabs>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           
           {/* Theme & Accent Color */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+          <Box id="appearance" sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 700 }}>
               🎨 App Accent Color (Live Preview)
             </Typography>
@@ -130,8 +194,88 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
 
           <Divider />
 
+          <Box id="authenticator" sx={{ scrollMarginTop: 60 }}>
+            <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>🕐 2FA Clock Sync</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Compare your device with UTC and compensate TOTP generation for drift.</Typography>
+            <Button variant="outlined" onClick={handleClockSync} disabled={clockSync.loading} sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2 }}>{clockSync.loading ? 'Checking…' : 'Sync Clock with Atomic UTC'}</Button>
+            {clockSync.status && <Alert severity={clockSync.status.includes('accurate') ? 'success' : 'info'} sx={{ mt: 1.5 }}>{clockSync.status}</Alert>}
+          </Box>
+
+          <Divider />
+
+          <DeviceUnlockSettings enabled={deviceEnabled} activeKey={activeKey} onEnable={onEnableDevice} onDisable={onDisableDevice} />
+
+          {/* Quick PIN Unlock Configuration (Bitwarden & 2FAS Feature) */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, scrollMarginTop: 60 }}>
+            <Typography variant="subtitle2" color="primary" sx={{ fontWeight: 700 }}>
+              ⚡ Quick PIN Unlock (Fast Session Resume)
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Resume this page session with a 4–8 digit PIN. Refreshing or closing the page requires your master password. Five failed attempts disable PIN unlock.
+            </Typography>
+
+            {pinMsg && <Alert severity="success">{pinMsg}</Alert>}
+            {pinError && <Alert severity="error">{pinError}</Alert>}
+
+            {pinEnabled ? (
+              <Box sx={{ p: 2, border: 1, borderColor: 'secondary.main', borderRadius: 3, bgcolor: 'rgba(16, 185, 129, 0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'secondary.main' }}>
+                    ✅ PIN Unlock is Active
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    You can unlock [{currentProfile}] using your numeric PIN.
+                  </Typography>
+                </Box>
+                <Button 
+                  size="small" 
+                  color="error" 
+                  variant="outlined" 
+                  onClick={handleDisablePin}
+                  sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
+                >
+                  Disable PIN
+                </Button>
+              </Box>
+            ) : (
+              <Box component="form" onSubmit={handleEnablePin} sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, p: 2, border: 1, borderColor: 'divider', borderRadius: 3 }}>
+                <Box sx={{ display: 'flex', gap: 1.5 }}>
+                  <TextField
+                    label="4–8 Digit PIN"
+                    type="password"
+                    size="small"
+                    fullWidth
+                    value={newPin}
+                    onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                    placeholder="1234"
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                  <TextField
+                    label="Confirm PIN"
+                    type="password"
+                    size="small"
+                    fullWidth
+                    value={confirmPin}
+                    onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                    placeholder="1234"
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  />
+                </Box>
+                <Button 
+                  type="submit" 
+                  variant="contained" 
+                  sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, alignSelf: 'flex-start', color: '#fff' }}
+                >
+                  Enable PIN Unlock
+                </Button>
+              </Box>
+            )}
+          </Box>
+
+          <Divider />
+
           {/* 2FA Preferences */}
-          <Box>
+          <Box id="authenticator-preferences" sx={{ scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>
               ⏱️ 2FA & Authenticator Preferences
             </Typography>
@@ -149,7 +293,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
           <Divider />
 
           {/* Password Generator Preferences */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box id="generator" sx={{ display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>
               🔐 Password Generator Defaults
             </Typography>
@@ -172,7 +316,7 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
           <Divider />
 
           {/* Security & Clipboard Preferences */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box id="security" sx={{ display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="primary" gutterBottom sx={{ fontWeight: 700 }}>
               🛡️ Security & Clipboard
             </Typography>
@@ -192,47 +336,30 @@ export default function SettingsModal({ open, onClose, settings, onSaveSettings,
               onChange={(e) => handleChange('autoLockMinutes', parseInt(e.target.value) || 10)}
               sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
             />
+            <FormControlLabel control={<Switch checked={!!localSettings.lockOnBlur} onChange={(e) => handleChange('lockOnBlur', e.target.checked)} />} label="Lock vault immediately when switching tabs or minimizing" />
           </Box>
 
           <Divider />
 
           {/* Danger Zone: Password-Protected Delete Vault */}
-          <Box component="form" onSubmit={handleDeleteVaultSubmit} sx={{ p: 2.5, border: 1, borderColor: 'error.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box id="danger" component="form" onSubmit={handleDeleteVaultSubmit} sx={{ p: 2.5, border: 1, borderColor: 'error.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(239, 68, 68, 0.04)', display: 'flex', flexDirection: 'column', gap: 2, scrollMarginTop: 60 }}>
             <Typography variant="subtitle2" color="error" sx={{ fontWeight: 700 }}>
               ⚠️ Danger Zone: Password-Protected Vault Deletion
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Permanently delete vault [{currentProfile}] and all stored data. Enter your master password to authorize this action.
+              Permanently delete vault [{currentProfile}] and all stored data. You will be asked for the master password before deletion.
             </Typography>
 
             {deleteError && <Alert severity="error">{deleteError}</Alert>}
 
-            <TextField
-              label="Enter Master Password to Confirm"
-              type="password"
-              size="small"
-              required
-              value={deletePassword}
-              onChange={(e) => setDeletePassword(e.target.value)}
-              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
-            />
-
-            <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
-              <Button
-                type="submit"
-                variant="contained"
-                color="error"
-                size="small"
-                sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2 }}
-              >
-                Permanently Delete Vault [{currentProfile}]
-              </Button>
-            </Box>
+            <Button type="submit" variant="contained" color="error" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, alignSelf: 'flex-start' }}>
+              Confirm & Delete Vault Permanently
+            </Button>
           </Box>
 
         </Box>
       </DialogContent>
-      <DialogActions sx={{ p: 2.5 }}>
+      <DialogActions sx={{ p: 2.5, display: 'flex', justifyContent: 'space-between', position: 'sticky', bottom: 0, bgcolor: 'background.paper', zIndex: 1, borderTop: 1, borderColor: 'divider' }}>
         <Button onClick={handleClose} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>Cancel</Button>
         <Button onClick={handleSave} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Save Preferences</Button>
       </DialogActions>

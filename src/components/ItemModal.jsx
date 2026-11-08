@@ -1,16 +1,48 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Box, FormControl, InputLabel, Select, MenuItem, Typography, IconButton, InputAdornment, LinearProgress } from '@mui/material';
+import { 
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Box, 
+  FormControl, InputLabel, Select, MenuItem, Typography, IconButton, InputAdornment, 
+  LinearProgress, Chip, ButtonGroup, CircularProgress, Stepper, Step, StepLabel, Alert
+} from '@mui/material';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
+import LanguageIcon from '@mui/icons-material/Language';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import LabelIcon from '@mui/icons-material/Label';
+import KeyIcon from '@mui/icons-material/Key';
 import { CryptoEngine } from '../utils/crypto';
+import { TOTP } from '../utils/totp';
+import { useFeedback } from './FeedbackProvider';
+import { assertPasskey, isWebAuthnSupported, registerPasskey } from '../utils/webauthn';
 
-export default function ItemModal({ open, onClose, onSave, editingItem, activeKey, settings }) {
+const DICEWARE_WORDLIST = [
+  'galaxy', 'falcon', 'orbit', 'matrix', 'crypto', 'shield', 'quantum', 'shadow', 
+  'vector', 'cipher', 'ember', 'phoenix', 'aurora', 'nexus', 'beacon', 'timber', 
+  'summit', 'glacier', 'canyon', 'planet', 'radar', 'breeze', 'castle', 'dragon', 
+  'forest', 'harbor', 'island', 'jungle', 'knight', 'lagoon', 'meadow', 'nebula', 
+  'oasis', 'palace', 'quest', 'river', 'safari', 'temple', 'valley', 'wizard', 
+  'zenith', 'comet', 'horizon', 'meteor', 'pulsar', 'vortex', 'anchor', 'voyage'
+];
+
+const PRESET_TAGS = ['Work', 'Personal', 'Finance', 'Crypto', 'Social', 'Shopping', 'Server'];
+
+export default function ItemModal({ open, onClose, onSave, editingItem, activeKey, settings, authenticatorItems = [] }) {
+  const { notify } = useFeedback();
   const [formName, setFormName] = useState('');
   const [formUsername, setFormUsername] = useState('');
   const [formPassword, setFormPassword] = useState('');
   const [formCategory, setFormCategory] = useState('Logins');
+  const [formWebsite, setFormWebsite] = useState('');
+  const [formFavorite, setFormFavorite] = useState(false);
+  const [formTags, setFormTags] = useState([]);
+  const [tagInput, setTagInput] = useState('');
+  const [customFields, setCustomFields] = useState([]);
   const [formNotes, setFormNotes] = useState('');
   const [formTotp, setFormTotp] = useState('');
+  const [totpId, setTotpId] = useState('');
   const [formAttachment, setFormAttachment] = useState(null);
 
   const [templateData, setTemplateData] = useState({});
@@ -21,14 +53,27 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
   const [showKey, setShowKey] = useState(false);
   const [showPassphrase, setShowPassphrase] = useState(false);
 
+  // Real-time inline HIBP breach check state
+  const [inlinePwnedCount, setInlinePwnedCount] = useState(null);
+  const [checkingInlinePwned, setCheckingInlinePwned] = useState(false);
+  const [itemStep, setItemStep] = useState(0);
+  const [formError, setFormError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+
   useEffect(() => {
     if (editingItem) {
       setFormName(editingItem.name || '');
       setFormUsername(editingItem.username || '');
       setFormPassword(editingItem.password || '');
       setFormCategory(editingItem.category || 'Logins');
+      setFormWebsite(editingItem.website || '');
+      setFormFavorite(Boolean(editingItem.favorite));
+      setFormTags(Array.isArray(editingItem.tags) ? editingItem.tags : []);
+      setCustomFields(Array.isArray(editingItem.customFields) ? editingItem.customFields : []);
       setFormNotes(editingItem.notes || '');
       setFormTotp(editingItem.totpSecret || '');
+      setTotpId(editingItem.totpId || '');
       setFormAttachment(editingItem.attachment || null);
       setTemplateData(editingItem.templateData || {});
     } else {
@@ -36,17 +81,52 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
       setFormUsername('');
       setFormPassword('');
       setFormCategory('Logins');
+      setFormWebsite('');
+      setFormFavorite(false);
+      setFormTags([]);
+      setCustomFields([]);
       setFormNotes('');
       setFormTotp('');
+      setTotpId('');
       setFormAttachment(null);
       setTemplateData({});
     }
+    setTagInput('');
     setShowPassword(false);
     setShowTotp(false);
     setShowSeed(false);
     setShowKey(false);
     setShowPassphrase(false);
+    setInlinePwnedCount(null);
+    setItemStep(0);
+    setFormError('');
   }, [editingItem, open]);
+
+  // Real-time inline breach check with debouncing
+  useEffect(() => {
+    if (!formPassword || formPassword.length < 6 || formCategory === 'Crypto' || formCategory === 'SSH' || formCategory === 'Passkeys') {
+      setInlinePwnedCount(null);
+      setCheckingInlinePwned(false);
+      return;
+    }
+
+    let cancelled = false;
+    setInlinePwnedCount(null);
+    setCheckingInlinePwned(true);
+    const timer = setTimeout(async () => {
+      setCheckingInlinePwned(true);
+      try {
+        const count = await CryptoEngine.checkPwnedPassword(formPassword);
+        if (!cancelled) setInlinePwnedCount(count);
+      } catch (e) {
+        if (!cancelled) setInlinePwnedCount(null);
+      } finally {
+        if (!cancelled) setCheckingInlinePwned(false);
+      }
+    }, 450);
+
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [formPassword, formCategory]);
 
   const handleCategoryChange = (newCat) => {
     setFormCategory(newCat);
@@ -56,6 +136,8 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
       setTemplateData({ host: '', port: '22', privateKey: '', passphrase: '' });
     } else if (newCat === 'Wifi') {
       setTemplateData({ ssid: '', securityType: 'WPA2/WPA3', hidden: 'No' });
+    } else if (newCat === 'Passkeys') {
+      setTemplateData({ rpId: '', credentialId: '', userHandle: '', algorithm: 'ES256 (WebAuthn / FIDO2)' });
     } else {
       setTemplateData({});
     }
@@ -79,12 +161,24 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
     setFormPassword(res);
   };
 
-  // Password strength meter calculation
+  const generatePassphrase = () => {
+    const wordCount = 4;
+    const array = new Uint32Array(wordCount);
+    crypto.getRandomValues(array);
+    const words = [];
+    for (let i = 0; i < wordCount; i++) {
+      const idx = array[i] % DICEWARE_WORDLIST.length;
+      words.push(DICEWARE_WORDLIST[idx]);
+    }
+    const numSuffix = Math.floor(Math.random() * 90 + 10);
+    setFormPassword(words.join('-') + '-' + numSuffix);
+  };
+
   const getPasswordStrength = (pwd) => {
     if (!pwd) return { score: 0, label: 'Empty', color: 'error' };
     let score = 0;
-    if (pwd.length >= 8) score += 25;
-    if (pwd.length >= 12) score += 25;
+    if (pwd.length >= 8) score += 20;
+    if (pwd.length >= 14) score += 30;
     if (/[A-Z]/.test(pwd) && /[0-9]/.test(pwd)) score += 25;
     if (/[^A-Za-z0-9]/.test(pwd)) score += 25;
 
@@ -96,11 +190,45 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
 
   const strength = getPasswordStrength(formPassword);
 
+  const handleToggleTag = (tag) => {
+    if (formTags.includes(tag)) {
+      setFormTags(formTags.filter(t => t !== tag));
+    } else {
+      setFormTags([...formTags, tag]);
+    }
+  };
+
+  const handleAddCustomTag = (e) => {
+    if (e.key === 'Enter' && tagInput.trim()) {
+      e.preventDefault();
+      const cleanTag = tagInput.trim().replace(/^#/, '');
+      if (!formTags.includes(cleanTag)) {
+        setFormTags([...formTags, cleanTag]);
+      }
+      setTagInput('');
+    }
+  };
+
+  const handleAddCustomField = () => {
+    setCustomFields([
+      ...customFields,
+      { id: Date.now().toString(), name: '', value: '', isSecret: false }
+    ]);
+  };
+
+  const handleUpdateCustomField = (id, field, val) => {
+    setCustomFields(customFields.map(cf => cf.id === id ? { ...cf, [field]: val } : cf));
+  };
+
+  const handleRemoveCustomField = (id) => {
+    setCustomFields(customFields.filter(cf => cf.id !== id));
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      alert('File size exceeds 5MB limit for local vault storage.');
+      notify('File size exceeds the 5MB limit for local vault storage.', 'warning');
       return;
     }
 
@@ -114,18 +242,64 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
         ...encryptedFile
       });
     } catch (err) {
-      alert('Failed to encrypt file attachment: ' + err.message);
+      setFormError('Failed to encrypt file attachment: ' + err.message);
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleRegisterPasskey = async () => {
+    setPasskeyBusy(true);
+    try {
+      const metadata = await registerPasskey({ userName: formUsername, displayName: formName, rpId: location.hostname });
+      setTemplateData(previous => ({ ...previous, ...metadata, algorithm: 'ES256 / WebAuthn' }));
+      notify('Passkey registered on this device. The private key stays in your authenticator.', 'success');
+    } catch (error) { notify(error.message, 'error'); }
+    finally { setPasskeyBusy(false); }
+  };
+
+  const handleTestPasskey = async () => {
+    setPasskeyBusy(true);
+    try { await assertPasskey(templateData.credentialId, templateData.rpId || location.hostname); notify('Passkey assertion succeeded.', 'success'); }
+    catch (error) { notify(error.message, 'error'); }
+    finally { setPasskeyBusy(false); }
+  };
+
+  const handleTotpChange = (e) => {
+    const val = e.target.value.trim();
+    if (val.startsWith('otpauth://')) {
+      const parsed = TOTP.parseOtpAuthUrl(val);
+      if (parsed.secret) {
+        setFormTotp(val);
+        if (!formName && parsed.issuer) setFormName(parsed.issuer);
+        if (!formUsername && parsed.account) setFormUsername(parsed.account);
+        return;
+      }
+    }
+    setFormTotp(val);
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formName) return;
+    if (saving) return;
+    if (!formName.trim()) {
+      setFormError('Enter an item name before saving.');
+      setItemStep(0);
+      return;
+    }
+    setFormError('');
+    if (checkingInlinePwned) {
+      setFormError('Please wait for the password breach check to finish before saving.');
+      return;
+    }
+    if (inlinePwnedCount > 0) {
+      setFormError('This password appears in public data breaches. Please choose a different password before saving.');
+      return;
+    }
 
     const existingHistory = editingItem?.passwordHistory || [];
     let updatedHistory = [...existingHistory];
 
-    if (editingItem && editingItem.password && editingItem.password !== formPassword) {
+    const passwordChanged = editingItem && editingItem.password && editingItem.password !== formPassword;
+    if (passwordChanged) {
       updatedHistory.unshift({
         password: editingItem.password,
         timestamp: new Date().toISOString()
@@ -133,33 +307,59 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
       if (updatedHistory.length > 5) updatedHistory.pop();
     }
 
-    onSave({
-      id: editingItem ? editingItem.id : Date.now().toString(),
+    setSaving(true);
+    try { await onSave({
+      id: editingItem ? editingItem.id : crypto.randomUUID(),
       name: formName,
       username: formUsername,
       password: formPassword,
       category: formCategory,
+      website: formWebsite,
+      favorite: formFavorite,
+      tags: formTags,
+      customFields: customFields.filter(cf => cf.name.trim() || cf.value.trim()),
       notes: formNotes,
       totpSecret: formTotp,
+      totpId: totpId || undefined,
       attachment: formAttachment,
       templateData: templateData,
-      passwordHistory: updatedHistory
-    });
+      passwordHistory: updatedHistory,
+      passwordUpdatedAt: passwordChanged || !editingItem ? new Date().toISOString() : (editingItem.passwordUpdatedAt || new Date().toISOString()),
+      createdAt: editingItem?.createdAt || new Date().toISOString()
+    }); } catch (error) { setFormError(error.message); } finally { setSaving(false); }
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 4, p: 1 } }}>
-      <DialogTitle sx={{ fontWeight: 800, fontSize: '1.25rem' }}>{editingItem ? 'Edit Vault Item' : 'New Vault Item & Template'}</DialogTitle>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: { xs: 0, sm: 4 }, p: 1, m: { xs: 0, sm: 2 }, maxHeight: { xs: '100%', sm: 'calc(100% - 64px)' } } }}>
+      <DialogTitle sx={{ fontWeight: 800, fontSize: '1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>{editingItem ? 'Edit Vault Item' : 'New Vault Item & Template'}</span>
+        <IconButton 
+          onClick={() => setFormFavorite(!formFavorite)}
+          color={formFavorite ? 'warning' : 'default'}
+          title={formFavorite ? 'Pinned Favorite' : 'Mark as Favorite'}
+        >
+          {formFavorite ? <StarIcon /> : <StarBorderIcon />}
+        </IconButton>
+      </DialogTitle>
       <DialogContent dividers>
         <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mt: 1 }}>
+          <Stepper activeStep={itemStep} alternativeLabel sx={{ mb: 1 }}>
+            <Step><StepLabel>Basics</StepLabel></Step>
+            <Step><StepLabel>Details</StepLabel></Step>
+          </Stepper>
+          {formError && <Alert severity="error">{formError}</Alert>}
+          <Box sx={{ display: itemStep === 0 ? 'flex' : 'none', flexDirection: 'column', gap: 2.5 }}>
           <TextField
             label="Item Name"
             required
             fullWidth
             value={formName}
-            onChange={(e) => setFormName(e.target.value)}
+            onChange={(e) => { setFormName(e.target.value); if (e.target.value.trim()) setFormError(''); }}
+            error={Boolean(formError && !formName.trim())}
+            helperText={formError && !formName.trim() ? formError : 'Use a recognizable name, such as GitHub or Personal email.'}
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
+
           <FormControl fullWidth>
             <InputLabel>Category / Template</InputLabel>
             <Select
@@ -169,6 +369,8 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
               sx={{ borderRadius: 3 }}
             >
               <MenuItem value="Logins">🔐 Login / Password</MenuItem>
+              <MenuItem value="Passkeys">🔑 Passkey metadata</MenuItem>
+              <MenuItem value="Identities">Identity</MenuItem>
               <MenuItem value="Cards">💳 Credit / Debit Card</MenuItem>
               <MenuItem value="Notes">📝 Secure Note</MenuItem>
               <MenuItem value="ApiKeys">🔑 API Key / Token</MenuItem>
@@ -178,7 +380,127 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             </Select>
           </FormControl>
 
-          {formCategory !== 'Crypto' && formCategory !== 'SSH' && formCategory !== 'Wifi' && (
+          {/* Tags / Groups (2FAS feature) */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}>
+                <LabelIcon fontSize="inherit" /> Tags & Groups
+              </Typography>
+            </Box>
+            <Box sx={{ display: 'flex', gap: 0.8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {PRESET_TAGS.map(tag => {
+                const isSelected = formTags.includes(tag);
+                return (
+                  <Chip
+                    key={tag}
+                    label={`#${tag}`}
+                    size="small"
+                    clickable
+                    color={isSelected ? 'primary' : 'default'}
+                    variant={isSelected ? 'filled' : 'outlined'}
+                    onClick={() => handleToggleTag(tag)}
+                    sx={{ fontWeight: 600, borderRadius: 1.5 }}
+                  />
+                );
+              })}
+              {formTags.filter(t => !PRESET_TAGS.includes(t)).map(tag => (
+                <Chip
+                  key={tag}
+                  label={`#${tag}`}
+                  size="small"
+                  color="primary"
+                  onDelete={() => handleToggleTag(tag)}
+                  sx={{ fontWeight: 600, borderRadius: 1.5 }}
+                />
+              ))}
+            </Box>
+            <TextField
+              size="small"
+              placeholder="Add custom tag (Press Enter)..."
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={handleAddCustomTag}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+            />
+          </Box>
+
+          {/* Website / Login URI (Bitwarden feature) */}
+          </Box>
+          <Box sx={{ display: itemStep === 1 ? 'flex' : 'none', flexDirection: 'column', gap: 2.5 }}>
+          {(formCategory === 'Logins' || formCategory === 'Passkeys') && (
+            <TextField
+              label="Website / Service URL (e.g. https://github.com)"
+              fullWidth
+              value={formWebsite}
+              onChange={(e) => setFormWebsite(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <LanguageIcon fontSize="small" color="action" />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+            />
+          )}
+
+          {/* Passkey Specific Template View */}
+          {formCategory === 'Passkeys' && (
+            <Box sx={{ p: 2.5, border: 1, borderColor: 'primary.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
+                <KeyIcon fontSize="small" /> Passkey metadata reference
+              </Typography>
+              <TextField
+                label="Relying Party ID (Domain)"
+                fullWidth
+                value={templateData.rpId || ''}
+                onChange={(e) => setTemplateData(prev => ({ ...prev, rpId: e.target.value }))}
+                placeholder="github.com or apple.com"
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+              />
+              <TextField
+                label="User Handle / Username"
+                fullWidth
+                value={formUsername}
+                onChange={(e) => setFormUsername(e.target.value)}
+                placeholder="user@example.com"
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+              />
+              <TextField
+                label="Credential ID (Base64)"
+                fullWidth
+                value={templateData.credentialId || ''}
+                onChange={(e) => setTemplateData(prev => ({ ...prev, credentialId: e.target.value }))}
+                placeholder="AQIDBAUGBwgJCgsMDQ4PEBES..."
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+              />
+              <TextField
+                label="Key Algorithm"
+                fullWidth
+                value={templateData.algorithm || 'ES256 (WebAuthn / FIDO2)'}
+                onChange={(e) => setTemplateData(prev => ({ ...prev, algorithm: e.target.value }))}
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+              />
+              <TextField
+                label="Public Key (Base64 / COSE)"
+                fullWidth
+                multiline
+                minRows={2}
+                value={templateData.publicKey || ''}
+                onChange={(e) => setTemplateData(prev => ({ ...prev, publicKey: e.target.value }))}
+                placeholder="Base64-encoded credential public key"
+                sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
+              />
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                <Button variant="contained" disabled={passkeyBusy || !isWebAuthnSupported()} onClick={handleRegisterPasskey} sx={{ textTransform: 'none' }}>{passkeyBusy ? 'Waiting for authenticator…' : 'Register passkey on this device'}</Button>
+                <Button variant="outlined" disabled={passkeyBusy || !templateData.credentialId} onClick={handleTestPasskey} sx={{ textTransform: 'none' }}>Test passkey</Button>
+              </Box>
+              {!isWebAuthnSupported() && <Alert severity="warning">Passkeys require a supported browser over HTTPS or localhost. This vault stores public credential metadata; the private key remains in the platform authenticator.</Alert>}
+              <Alert severity="info">Registered credentials stay in the device authenticator. CipherVault stores only the credential ID and relying-party metadata, and cannot recover a lost passkey.</Alert>
+            </Box>
+          )}
+
+          {formCategory !== 'Crypto' && formCategory !== 'SSH' && formCategory !== 'Wifi' && formCategory !== 'Passkeys' && (
             <>
               <TextField
                 label="Username / Email / Identifier"
@@ -187,6 +509,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                 onChange={(e) => setFormUsername(e.target.value)}
                 sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
               />
+
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                   <TextField
@@ -199,17 +522,31 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                     InputProps={{
                       endAdornment: (
                         <InputAdornment position="end">
-                          <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
+                          <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" aria-label={showPassword ? 'Hide password' : 'Show password'}>
                             {showPassword ? <VisibilityOff /> : <Visibility />}
                           </IconButton>
                         </InputAdornment>
                       ),
                     }}
                   />
-                  <Button variant="outlined" onClick={generateRandomPassword} sx={{ whiteSpace: 'nowrap', height: '56px', borderRadius: 3, fontWeight: 600 }}>
-                    Generate ({settings?.passwordLength || 16})
-                  </Button>
+                  <ButtonGroup variant="outlined" size="small" sx={{ height: '56px', borderRadius: 3, overflow: 'hidden' }}>
+                    <Button 
+                      onClick={generateRandomPassword} 
+                      sx={{ textTransform: 'none', fontWeight: 600, px: 1.5 }}
+                      title="Generate random characters"
+                    >
+                      🔀 Random
+                    </Button>
+                    <Button 
+                      onClick={generatePassphrase} 
+                      sx={{ textTransform: 'none', fontWeight: 600, px: 1.5 }}
+                      title="Generate memorable Diceware passphrase"
+                    >
+                      💬 Passphrase
+                    </Button>
+                  </ButtonGroup>
                 </Box>
+
                 {formPassword && (
                   <Box sx={{ px: 1 }}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
@@ -217,6 +554,36 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
                       <Typography variant="caption" color={`${strength.color}.main`} sx={{ fontWeight: 700 }}>{strength.label}</Typography>
                     </Box>
                     <LinearProgress variant="determinate" value={strength.score} color={strength.color} sx={{ height: 6, borderRadius: 3 }} />
+
+                    {/* Real-Time Inline Breach Check Status (HIBP) */}
+                    {checkingInlinePwned && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.8 }}>
+                        <CircularProgress size={12} />
+                        <Typography variant="caption" color="text.secondary">
+                          Checking HaveIBeenPwned breach database...
+                        </Typography>
+                      </Box>
+                    )}
+                    {!checkingInlinePwned && inlinePwnedCount !== null && (
+                      <Typography 
+                        variant="caption" 
+                        sx={{ 
+                          display: 'block', 
+                          mt: 0.8, 
+                          fontWeight: 700, 
+                          color: inlinePwnedCount > 0 ? 'error.main' : 'success.main' 
+                        }}
+                      >
+                        {inlinePwnedCount > 0 
+                          ? `🚨 Warning: Found in ${inlinePwnedCount.toLocaleString()} data breaches! Choose another password.` 
+                          : '✨ Zero known breaches (Checked against HaveIBeenPwned)'}
+                      </Typography>
+                    )}
+                    {!checkingInlinePwned && inlinePwnedCount === null && formPassword.length >= 6 && (
+                      <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: .8, fontWeight: 600 }}>
+                        Unable to verify breach status right now. Saving is allowed, but verify this password when online.
+                      </Typography>
+                    )}
                   </Box>
                 )}
               </Box>
@@ -227,7 +594,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             <Box sx={{ p: 2.5, border: 1, borderColor: 'primary.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 700 }}>🪙 Crypto Wallet Template</Typography>
-                <IconButton size="small" onClick={() => setShowSeed(!showSeed)}>
+                <IconButton size="small" onClick={() => setShowSeed(!showSeed)} aria-label={showSeed ? 'Hide recovery seed' : 'Show recovery seed'}>
                   {showSeed ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                 </IconButton>
               </Box>
@@ -257,7 +624,7 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             <Box sx={{ p: 2.5, border: 1, borderColor: 'primary.main', borderRadius: 3, bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(99, 102, 241, 0.04)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="subtitle2" color="primary.main" sx={{ fontWeight: 700 }}>🖥️ Server SSH Key Template</Typography>
-                <IconButton size="small" onClick={() => setShowKey(!showKey)}>
+                <IconButton size="small" onClick={() => setShowKey(!showKey)} aria-label={showKey ? 'Hide private key' : 'Show private key'}>
                   {showKey ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                 </IconButton>
               </Box>
@@ -344,13 +711,18 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             </Box>
           )}
 
+          <TextField select label="Linked authenticator account" value={totpId} onChange={e => { setTotpId(e.target.value); setFormTotp(authenticatorItems.find(item => item.id === e.target.value)?.totpSecret || ''); }} helperText="Link an existing token, or choose New / none to add a token or remove the link.">
+            <MenuItem value="">New / none</MenuItem>{authenticatorItems.map(item => <MenuItem key={item.id} value={item.id}>{item.name} — {item.username || ''}</MenuItem>)}
+          </TextField>
           <TextField
-            label="TOTP Secret Key (for 2FA)"
+            label="TOTP Secret Key or otpauth:// link (for 2FA)"
+            disabled={Boolean(totpId)}
+            helperText={totpId ? 'Edit the shared secret in the Authenticator tab.' : 'A new secret creates a separate authenticator account linked to this login.'}
             fullWidth
             type={showTotp ? 'text' : 'password'}
             value={formTotp}
-            onChange={(e) => setFormTotp(e.target.value)}
-            placeholder="JBSWY3DPEHPK3PXP"
+            onChange={handleTotpChange}
+            placeholder="JBSWY3DPEHPK3PXP or otpauth://totp/..."
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
             InputProps={{
               endAdornment: (
@@ -362,6 +734,67 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
               ),
             }}
           />
+
+          {/* Custom Fields & Backup Codes (Bitwarden Feature) */}
+          <Box sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 3, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                🧩 Custom Fields & Backup Codes ({customFields.length})
+              </Typography>
+              <Button 
+                size="small" 
+                variant="outlined" 
+                startIcon={<AddCircleOutlineIcon />}
+                onClick={handleAddCustomField}
+                sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2 }}
+              >
+                Add Field
+              </Button>
+            </Box>
+
+            {customFields.map((cf) => (
+              <Box key={cf.id} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <TextField
+                  size="small"
+                  label="Field Name"
+                  placeholder="Security Question, Recovery Code, etc."
+                  value={cf.name}
+                  onChange={(e) => handleUpdateCustomField(cf.id, 'name', e.target.value)}
+                  sx={{ width: '40%', '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                />
+                <TextField
+                  size="small"
+                  label="Value"
+                  type={cf.isSecret ? 'password' : 'text'}
+                  value={cf.value}
+                  onChange={(e) => handleUpdateCustomField(cf.id, 'value', e.target.value)}
+                  sx={{ flex: 1, '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton 
+                          size="small" 
+                          onClick={() => handleUpdateCustomField(cf.id, 'isSecret', !cf.isSecret)}
+                          title={cf.isSecret ? 'Reveal' : 'Mask as Secret'}
+                        >
+                          {cf.isSecret ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+                <IconButton size="small" color="error" onClick={() => handleRemoveCustomField(cf.id)}>
+                  <DeleteOutlineIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            ))}
+
+            {customFields.length === 0 && (
+              <Typography variant="caption" color="text.secondary">
+                Add extra fields for security questions, backup recovery codes, or API secrets.
+              </Typography>
+            )}
+          </Box>
 
           <Box sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 3 }}>
             <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600 }}>📎 Encrypted File Attachment</Typography>
@@ -389,11 +822,16 @@ export default function ItemModal({ open, onClose, onSave, editingItem, activeKe
             onChange={(e) => setFormNotes(e.target.value)}
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
+          </Box>
         </Box>
       </DialogContent>
-      <DialogActions sx={{ p: 2.5 }}>
-        <Button onClick={onClose} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>Cancel</Button>
-        <Button onClick={handleSubmit} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Save Item</Button>
+      <DialogActions sx={{ p: 2.5, position: 'sticky', bottom: 0, bgcolor: 'background.paper', zIndex: 1, borderTop: 1, borderColor: 'divider' }}>
+        <Button onClick={itemStep === 0 ? onClose : () => setItemStep(0)} color="inherit" sx={{ textTransform: 'none', fontWeight: 600 }}>{itemStep === 0 ? 'Cancel' : 'Back'}</Button>
+        {itemStep === 0 ? (
+          <Button onClick={() => { if (!formName.trim()) { setFormError('Enter an item name to continue.'); return; } setFormError(''); setItemStep(1); }} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>Continue</Button>
+        ) : (
+          <Button onClick={handleSubmit} disabled={saving} variant="contained" sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3 }}>{saving ? 'Saving…' : 'Save Item'}</Button>
+        )}
       </DialogActions>
     </Dialog>
   );
