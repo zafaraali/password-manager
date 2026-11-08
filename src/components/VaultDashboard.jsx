@@ -667,7 +667,7 @@ export default function VaultDashboard({
             <MenuItem component="label" onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.querySelector('input').click(); }}>QR image or authenticator file<input hidden type="file" accept=".json,.2fas,image/*" onChange={e => { handleAuthImport(e); setImportAnchor(null); }} /></MenuItem>
             <MenuItem onClick={() => { setImportAnchor(null); startCameraScanner(); }}>Scan QR with camera</MenuItem>
           </Menu>
-          <Button variant="contained" size="large" onClick={handleOpenAdd} sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: '#fff', px: 3, background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)' }}>
+<Button variant="contained" color="primary" size="large" onClick={handleOpenAdd} sx={{ textTransform: 'none', fontWeight: 700, borderRadius: 2, color: 'primary.contrastText', px: 3, boxShadow: theme => `0 4px 12px ${theme.palette.primary.main}4d` }}>
             + Add Item
           </Button>
         </Box>
