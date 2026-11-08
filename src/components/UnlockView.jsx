@@ -151,10 +151,11 @@ export default function UnlockView({ profileName, onUnlockSuccess, onSwitchToSet
                 textTransform: 'none', 
                 fontWeight: 700, 
                 borderRadius: 3, 
-                color: '#fff', 
+                 color: 'success.contrastText', 
                 py: 1.5, 
-                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', 
-                boxShadow: '0 4px 14px rgba(16, 185, 129, 0.3)' 
+                 background: theme => theme.palette.success.main, 
+                 '&:hover': { background: theme => theme.palette.success.dark },
+                 boxShadow: theme => `0 4px 14px ${theme.palette.success.main}4d` 
               }}
             >
               Unlock with PIN
@@ -200,10 +201,11 @@ export default function UnlockView({ profileName, onUnlockSuccess, onSwitchToSet
                 textTransform: 'none', 
                 fontWeight: 700, 
                 borderRadius: 3, 
-                color: '#fff', 
+                 color: 'primary.contrastText', 
                 py: 1.5, 
-                background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', 
-                boxShadow: '0 4px 14px rgba(99, 102, 241, 0.3)' 
+                 background: theme => theme.palette.primary.main, 
+                 '&:hover': { background: theme => theme.palette.primary.dark },
+                 boxShadow: theme => `0 4px 14px ${theme.palette.primary.main}4d` 
               }}
             >
               Unlock Vault
