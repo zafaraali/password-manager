@@ -5,6 +5,28 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Paper, Typography, TextField, Button, Box, Alert, Chip } from '@mui/material';
 import { CryptoEngine } from '../utils/crypto';
 
+const exampleItems = [
+  {
+    id: 'example-login',
+    name: 'Example login',
+    username: 'demo@example.com',
+    password: 'ExamplePassword123!',
+    website: 'https://example.com',
+    category: 'Logins',
+    notes: 'This sample login is safe to delete or replace with your own credential.',
+    totpId: 'example-2fa',
+  },
+  {
+    id: 'example-2fa',
+    name: 'Example 2FA',
+    username: 'demo@example.com',
+    issuer: 'Example',
+    category: 'Authenticator',
+    // Public sample secret used to demonstrate the authenticator flow.
+    totpSecret: 'JBSWY3DPEHPK3PXP',
+  },
+];
+
 export default function SetupView({ onSetupSuccess, profileName }) {
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
@@ -48,7 +70,7 @@ export default function SetupView({ onSetupSuccess, profileName }) {
       if (record?.vault && !await confirm({ title: 'Replace existing vault?', message: 'This creates an empty vault. Export a backup first. The previous encrypted version will also be retained locally.', confirmLabel: 'Replace vault', severity: 'error' })) return;
       const derivedKey = await CryptoEngine.deriveMasterKey(password, newSalt);
       
-      const initialItems = [];
+      const initialItems = structuredClone(exampleItems);
 
       const vaultPayload = { items: initialItems, trash: [] };
       const encrypted = await CryptoEngine.encryptPayload(derivedKey, JSON.stringify(vaultPayload));
@@ -83,11 +105,11 @@ export default function SetupView({ onSetupSuccess, profileName }) {
         </Paper>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' }, gap: 1, mb: 3 }}>
           <Chip label="Backup needed" color="success" variant="outlined" />
-          <Chip label="Next: add an item" color="primary" variant="outlined" />
+          <Chip label="2 examples added" color="primary" variant="outlined" />
           <Chip label="Then: secure your session" variant="outlined" />
         </Box>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 3 }}>
-          <Chip label="Next: add a login, note, or authenticator token" variant="outlined" color="primary" />
+          <Chip label="Example login + 2FA ready to explore" variant="outlined" color="primary" />
           <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
             You can enable PIN unlock, import an existing vault, and review security settings from the dashboard.
           </Typography>
@@ -97,7 +119,7 @@ export default function SetupView({ onSetupSuccess, profileName }) {
           variant="contained"
           size="large"
           onClick={() => {
-            onSetupSuccess(derivedVaultKey, [], [], createdRevision);
+            onSetupSuccess(derivedVaultKey, exampleItems, [], createdRevision);
           }}
           sx={{ py: 1.5, fontWeight: 600, color: '#fff' }}
         >
